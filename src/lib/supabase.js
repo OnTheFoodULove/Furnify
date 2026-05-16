@@ -1,29 +1,26 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient } from '@supabase/supabase-js';
+import { Platform } from 'react-native';
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
 if (!supabaseUrl || !supabaseAnonKey || supabaseUrl.includes('placeholder')) {
-  const msg = `[Supabase] CONFIG ERROR:\nURL: ${supabaseUrl ? 'Length ' + supabaseUrl.length : 'MISSING'}\nKey: ${supabaseAnonKey ? 'Length ' + supabaseAnonKey.length : 'MISSING'}\n` +
-    'Please RESTART your dev server (npm run web) after editing .env.';
-  console.error(msg);
-  if (typeof window !== 'undefined' && window.alert && !window.__supabase_alerted) {
-    window.alert(msg);
-    window.__supabase_alerted = true;
-  }
+  console.error(
+    `[Supabase] CONFIG ERROR: URL=${supabaseUrl ? 'OK' : 'MISSING'} Key=${supabaseAnonKey ? 'OK' : 'MISSING'}\n` +
+    'Restart the dev server after editing .env'
+  );
 }
 
-console.log('[Supabase] URL Start:', supabaseUrl ? supabaseUrl.substring(0, 20) + '...' : 'NONE');
-console.log('[Supabase] Key Start:', supabaseAnonKey ? supabaseAnonKey.substring(0, 10) + '...' : 'NONE');
+console.log('[Supabase] Platform:', Platform.OS);
+console.log('[Supabase] URL:', supabaseUrl ? supabaseUrl.substring(0, 30) + '...' : 'NONE');
 
 // Storage Cleanup: Remove conflicting tokens from other Supabase projects (Web only)
 if (typeof window !== 'undefined' && window.localStorage && supabaseUrl) {
   try {
     const currentProjectId = supabaseUrl.split('//')[1]?.split('.')[0];
     if (currentProjectId) {
-      const keys = Object.keys(window.localStorage);
-      keys.forEach(key => {
+      Object.keys(window.localStorage).forEach(key => {
         if (key.startsWith('sb-') && key.endsWith('-auth-token') && !key.includes(currentProjectId)) {
           console.log(`[Supabase] Removing conflicting storage key: ${key}`);
           window.localStorage.removeItem(key);
@@ -35,65 +32,54 @@ if (typeof window !== 'undefined' && window.localStorage && supabaseUrl) {
   }
 }
 
-// Robust storage selection for Web vs Native
-const customStorage = {
-  getItem: async (key) => {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      return window.localStorage.getItem(key);
-    }
-    return AsyncStorage.getItem(key);
-  },
-  setItem: async (key, value) => {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      window.localStorage.setItem(key, value);
-      return;
-    }
-    return AsyncStorage.setItem(key, value);
-  },
-  removeItem: async (key) => {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      window.localStorage.removeItem(key);
-      return;
-    }
-    return AsyncStorage.removeItem(key);
-  },
-};
-
+/**
+ * ROOT CAUSE FIX:
+ * supabase-js v2 uses an internal lock mechanism during auth operations.
+ * On Expo Web, passing AsyncStorage as the storage adapter causes a deadlock
+ * because AsyncStorage's web polyfill wraps localStorage in async callbacks
+ * that conflict with supabase-js GoTrueClient's locking — making signIn/signUp
+ * hang indefinitely despite the network request completing successfully.
+ *
+ * Fix: On web, do NOT pass a custom storage adapter — let supabase-js use
+ * window.localStorage directly (its default). On native, AsyncStorage is required.
+ */
 export const supabase = createClient(
   supabaseUrl || 'https://placeholder.supabase.co',
   supabaseAnonKey || 'placeholder',
   {
     auth: {
-      storage: customStorage,
+      // ⚠️ Only use AsyncStorage on native — NEVER on web (causes deadlock in supabase-js v2)
+      ...(Platform.OS !== 'web'
+        ? {
+            storage: AsyncStorage,
+            storageKey: supabaseUrl
+              ? `sb-${supabaseUrl.split('//')[1]?.split('.')[0]}-auth-token`
+              : undefined,
+          }
+        : {}),
       autoRefreshToken: true,
       persistSession: true,
       detectSessionInUrl: false,
-      storageKey: supabaseUrl ? `sb-${supabaseUrl.split('//')[1]?.split('.')[0]}-auth-token` : undefined,
+      // 🚀 FIXED WEB LOCK: Providing a no-op lock function to prevent deadlocks 
+      // without causing TypeErrors. This ensures profile queries can complete.
+      ...(Platform.OS === 'web' 
+        ? { 
+            lockType: 'custom', 
+            lock: async (name, acquireTimeout, fn) => {
+              if (typeof fn === 'function') {
+                return await fn();
+              }
+              // Fallback just in case
+              return;
+            }
+          } 
+        : {}),
     },
   }
 );
 
-// Connectivity check
-(async () => {
-  try {
-    console.log('[Supabase] Testing connection...');
-    
-    const checkPromise = supabase.from('users').select('count', { count: 'exact', head: true });
-    const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('Connection test timed out')), 5000)
-    );
 
-    const { data, error } = await Promise.race([checkPromise, timeoutPromise]);
-    
-    if (error) {
-      console.warn('[Supabase] Connection test warning:', error.message);
-    } else {
-      console.log('[Supabase] Connection test: SUCCESS');
-    }
-  } catch (err) {
-    console.warn('[Supabase] Connection test non-critical failure:', err.message);
-  }
-})();
+
 
 /**
  * Upload an image to Supabase Storage

@@ -103,8 +103,8 @@ export default function EditFurnitureScreen({ route, navigation }) {
       
       // Upload new image if selected
       if (imageAsset) {
-        const fileName = generateStorageFileName('furniture', imageAsset.uri);
-        const contentType = getContentType(imageAsset.uri);
+        const fileName = generateStorageFileName('furniture', imageAsset.uri, imageAsset.mimeType);
+        const contentType = getContentType(imageAsset.uri, imageAsset.mimeType);
         const { url, error: uploadError } = await uploadImage(
           'furniture-images',
           fileName,

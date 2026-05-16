@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import * as MediaLibrary from 'expo-media-library';
 import Toast from 'react-native-toast-message';
 import { Colors, Typography, Spacing, BorderRadius, Shadows } from '../../theme';
 
@@ -85,12 +86,27 @@ export default function ImagePlacementScreen({ route, navigation }) {
     }).start();
   };
 
-  const handleSave = () => {
-    Toast.show({
-      type: 'success',
-      text1: 'Saved',
-      text2: 'Photo saved to your device',
-    });
+  const handleSave = async () => {
+    if (!backgroundUri) return;
+    try {
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert(
+          'Permission Required',
+          'Please allow access to your photo library to save the image.',
+        );
+        return;
+      }
+      await MediaLibrary.saveToLibraryAsync(backgroundUri);
+      Toast.show({
+        type: 'success',
+        text1: 'Saved!',
+        text2: 'Photo saved to your device gallery.',
+      });
+    } catch (err) {
+      console.error('[ImagePlacement] save error:', err.message);
+      Toast.show({ type: 'error', text1: 'Save Failed', text2: 'Could not save the image.' });
+    }
   };
 
   if (!backgroundUri) {

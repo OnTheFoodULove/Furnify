@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import { supabase } from '../../lib/supabase';
 import {
   View,
   Text,
@@ -25,21 +26,8 @@ export default function UserLoginScreen({ navigation }) {
   const [password, setPassword] = useState('');
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
-  const [isConnected, setIsConnected] = useState(null); // null = checking, true = ok, false = fail
+  const [lockoutMsg, setLockoutMsg] = useState('');
   const passwordRef = useRef(null);
-
-  React.useEffect(() => {
-    checkConnection();
-  }, []);
-
-  async function checkConnection() {
-    try {
-      const { error } = await supabase.from('furniture').select('id', { head: true, count: 'exact' }).limit(1);
-      setIsConnected(!error);
-    } catch (e) {
-      setIsConnected(false);
-    }
-  }
 
   function validate() {
     const newErrors = {};
@@ -53,26 +41,31 @@ export default function UserLoginScreen({ navigation }) {
 
   async function handleLogin() {
     if (!validate()) return;
+    setLockoutMsg('');
     setLoading(true);
     try {
       const cleanEmail = sanitizeEmail(email);
       const result = await signIn(cleanEmail, password);
 
       if (!result.success) {
-        Toast.show({ type: 'error', text1: 'Login Failed', text2: result.error });
+        // Surface lockout messages prominently
+        if (result.error?.includes('Too many failed attempts')) {
+          setLockoutMsg(result.error);
+        } else {
+          Toast.show({ type: 'error', text1: 'Login Failed', text2: result.error });
+        }
         return;
       }
 
+      // AppNavigator reacts to session/profile changes automatically —
+      // no manual navigation.replace() needed here.
       if (result.role === 'admin') {
-        Toast.show({ type: 'info', text1: 'Admin detected', text2: 'Redirecting to admin panel...' });
-        navigation.replace('AdminTabs');
-        return;
+        Toast.show({ type: 'info', text1: 'Admin account detected', text2: 'Redirecting to admin panel...' });
+      } else {
+        Toast.show({ type: 'success', text1: 'Welcome back!' });
       }
-
-      Toast.show({ type: 'success', text1: 'Welcome back!' });
-      navigation.replace('UserTabs');
     } catch (err) {
-      console.error('[UserLoginScreen] handleLogin error:', err);
+      console.error('[UserLoginScreen] handleLogin error:', err.message);
       Toast.show({ type: 'error', text1: 'Login Error', text2: 'An unexpected error occurred.' });
     } finally {
       setLoading(false);
@@ -96,17 +89,6 @@ export default function UserLoginScreen({ navigation }) {
 
         {/* Header */}
         <View style={styles.header}>
-          <View style={styles.connStatus}>
-            <View style={[styles.dot, isConnected === true ? styles.dotGreen : isConnected === false ? styles.dotRed : styles.dotGray]} />
-            <Text style={styles.connText}>
-              {isConnected === true ? 'Server Online' : isConnected === false ? 'Server Offline' : 'Checking connection...'}
-            </Text>
-            {isConnected === false && (
-              <TouchableOpacity onPress={checkConnection}>
-                <Text style={styles.retryText}>Retry</Text>
-              </TouchableOpacity>
-            )}
-          </View>
           <Image
             source={require('../../../assets/images/logo.png')}
             style={styles.logo}
@@ -151,10 +133,18 @@ export default function UserLoginScreen({ navigation }) {
             leftIcon={<Ionicons name="lock-closed-outline" size={18} color={Colors.textSecondary} />}
           />
 
+          {lockoutMsg ? (
+            <View style={styles.lockoutBox}>
+              <Ionicons name="lock-closed" size={18} color={Colors.error} />
+              <Text style={styles.lockoutText}>{lockoutMsg}</Text>
+            </View>
+          ) : null}
+
           <Button
             title="Sign In"
             onPress={handleLogin}
             loading={loading}
+            disabled={!!lockoutMsg}
             style={styles.loginBtn}
           />
         </View>
@@ -251,33 +241,22 @@ const styles = StyleSheet.create({
     fontSize: Typography.size.sm,
     color: Colors.textMuted,
   },
-  connStatus: {
+  lockoutBox: {
     flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: Spacing.base,
-    backgroundColor: Colors.surfaceElevated,
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 4,
-    borderRadius: BorderRadius.full,
-    gap: 6,
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: '#FFF1F0',
+    borderWidth: 1,
+    borderColor: Colors.error,
+    borderRadius: BorderRadius.md,
+    padding: Spacing.md,
+    marginBottom: Spacing.md,
   },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  dotGreen: { backgroundColor: '#4ADE80' },
-  dotRed: { backgroundColor: Colors.error },
-  dotGray: { backgroundColor: Colors.textMuted },
-  connText: {
-    fontSize: 11,
-    color: Colors.textSecondary,
-    fontWeight: '500',
-  },
-  retryText: {
-    fontSize: 11,
-    color: Colors.primary,
-    fontWeight: 'bold',
-    textDecorationLine: 'underline',
+  lockoutText: {
+    flex: 1,
+    fontSize: Typography.size.sm,
+    color: Colors.error,
+    lineHeight: Typography.size.sm * 1.5,
+    fontWeight: Typography.weight.medium,
   },
 });

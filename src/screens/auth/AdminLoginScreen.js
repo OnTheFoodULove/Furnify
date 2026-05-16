@@ -20,11 +20,12 @@ import { validateEmail, validatePassword } from '../../utils/validation';
 import { sanitizeEmail } from '../../utils/sanitize';
 
 export default function AdminLoginScreen({ navigation }) {
-  const { signIn } = useAuth();
+  const { signIn, signOut } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
+  const [lockoutMsg, setLockoutMsg] = useState('');
   const passwordRef = useRef(null);
 
   function validate() {
@@ -41,6 +42,7 @@ export default function AdminLoginScreen({ navigation }) {
 
   async function handleLogin() {
     if (!validate()) return;
+    setLockoutMsg('');
     setLoading(true);
 
     try {
@@ -48,7 +50,11 @@ export default function AdminLoginScreen({ navigation }) {
       const result = await signIn(cleanEmail, password);
 
       if (!result.success) {
-        Toast.show({ type: 'error', text1: 'Login Failed', text2: result.error });
+        if (result.error?.includes('Too many failed attempts')) {
+          setLockoutMsg(result.error);
+        } else {
+          Toast.show({ type: 'error', text1: 'Login Failed', text2: result.error });
+        }
         return;
       }
 
@@ -58,13 +64,16 @@ export default function AdminLoginScreen({ navigation }) {
           text1: 'Access Denied',
           text2: 'This account does not have admin privileges.',
         });
+        // Sign out so the non-admin user isn't left in a partial auth state
+        await signOut();
         return;
       }
 
+      // AppNavigator reacts to session/profile changes automatically —
+      // no manual navigation.replace() needed here.
       Toast.show({ type: 'success', text1: 'Welcome back, Admin!' });
-      navigation.replace('AdminTabs');
     } catch (err) {
-      console.error('[AdminLoginScreen] handleLogin error:', err);
+      console.error('[AdminLoginScreen] handleLogin error:', err.message);
       Toast.show({
         type: 'error',
         text1: 'Login Error',
@@ -137,10 +146,18 @@ export default function AdminLoginScreen({ navigation }) {
             leftIcon={<Ionicons name="lock-closed-outline" size={18} color={Colors.textSecondary} />}
           />
 
+          {lockoutMsg ? (
+            <View style={styles.lockoutBox}>
+              <Ionicons name="lock-closed" size={18} color={Colors.error} />
+              <Text style={styles.lockoutText}>{lockoutMsg}</Text>
+            </View>
+          ) : null}
+
           <Button
             title="Sign In to Dashboard"
             onPress={handleLogin}
             loading={loading}
+            disabled={!!lockoutMsg}
             style={styles.loginBtn}
           />
         </View>
@@ -219,5 +236,23 @@ const styles = StyleSheet.create({
     fontSize: Typography.size.xs,
     color: Colors.textMuted,
     lineHeight: Typography.size.xs * 1.6,
+  },
+  lockoutBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: '#FFF1F0',
+    borderWidth: 1,
+    borderColor: Colors.error,
+    borderRadius: BorderRadius.md,
+    padding: Spacing.md,
+    marginBottom: Spacing.md,
+  },
+  lockoutText: {
+    flex: 1,
+    fontSize: Typography.size.sm,
+    color: Colors.error,
+    lineHeight: Typography.size.sm * 1.5,
+    fontWeight: Typography.weight.medium,
   },
 });

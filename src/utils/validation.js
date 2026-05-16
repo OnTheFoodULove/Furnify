@@ -63,8 +63,8 @@ export function validateUsername(username) {
   if (username.trim().length > 30) {
     return { valid: false, message: 'Username must be 30 characters or fewer' };
   }
-  if (!/^[a-zA-Z0-9_]+$/.test(username.trim())) {
-    return { valid: false, message: 'Username can only contain letters, numbers, and underscores' };
+  if (!/^[a-zA-Z0-9_\s\-']+$/.test(username.trim())) {
+    return { valid: false, message: 'Name can only contain letters, numbers, spaces, and basic punctuation (-_\')' };
   }
   return { valid: true, message: '' };
 }

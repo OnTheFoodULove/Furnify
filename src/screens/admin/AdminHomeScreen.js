@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
   Text,
@@ -51,9 +52,14 @@ export default function AdminHomeScreen({ navigation }) {
     }
   }, []);
 
+  useFocusEffect(
+    useCallback(() => {
+      fetchFurniture();
+    }, [fetchFurniture])
+  );
+
   useEffect(() => {
-    fetchFurniture();
-    // Subscribe to real-time changes
+    // Subscribe to real-time changes as a fallback for cross-device updates
     const channel = supabase
       .channel('furniture_changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'furniture' }, fetchFurniture)

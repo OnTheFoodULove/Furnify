@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import { supabase } from '../../lib/supabase';
 import {
   View,
   Text,
@@ -28,21 +29,7 @@ export default function UserSignUpScreen({ navigation }) {
   const [form, setForm] = useState({ username: '', email: '', password: '', confirm: '' });
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
-  const [isConnected, setIsConnected] = useState(null);
   const emailRef = useRef(null);
-
-  React.useEffect(() => {
-    checkConnection();
-  }, []);
-
-  async function checkConnection() {
-    try {
-      const { error } = await supabase.from('furniture').select('id', { head: true, count: 'exact' }).limit(1);
-      setIsConnected(!error);
-    } catch (e) {
-      setIsConnected(false);
-    }
-  }
   const passwordRef = useRef(null);
   const confirmRef = useRef(null);
 
@@ -84,11 +71,21 @@ export default function UserSignUpScreen({ navigation }) {
         return;
       }
 
-      Toast.show({
-        type: 'success',
-        text1: 'Account Created!',
-        text2: 'Please check your email to verify your account, then sign in.',
-      });
+      if (result.needsConfirmation) {
+        Toast.show({
+          type: 'success',
+          text1: 'Account Created!',
+          text2: 'Check your email for a confirmation link, then sign in.',
+          visibilityTime: 5000,
+        });
+      } else {
+        Toast.show({
+          type: 'success',
+          text1: 'Account Created!',
+          text2: 'Welcome to Furnify! You can now sign in.',
+          visibilityTime: 4000,
+        });
+      }
       navigation.navigate('UserLogin');
     } catch (err) {
       console.error('[UserSignUpScreen] handleSignUp error:', err);
@@ -142,17 +139,6 @@ export default function UserSignUpScreen({ navigation }) {
 
         {/* Header */}
         <View style={styles.header}>
-          <View style={styles.connStatus}>
-            <View style={[styles.dot, isConnected === true ? styles.dotGreen : isConnected === false ? styles.dotRed : styles.dotGray]} />
-            <Text style={styles.connText}>
-              {isConnected === true ? 'Server Online' : isConnected === false ? 'Server Offline' : 'Checking connection...'}
-            </Text>
-            {isConnected === false && (
-              <TouchableOpacity onPress={checkConnection}>
-                <Text style={styles.retryText}>Retry</Text>
-              </TouchableOpacity>
-            )}
-          </View>
           <Text style={styles.title}>Create Account</Text>
           <Text style={styles.subtitle}>
             Join Furnify and discover your perfect furniture.
@@ -338,35 +324,5 @@ const styles = StyleSheet.create({
     fontSize: Typography.size.base,
     color: Colors.primary,
     fontWeight: Typography.weight.bold,
-  },
-  connStatus: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: Spacing.sm,
-    backgroundColor: Colors.surfaceElevated,
-    alignSelf: 'flex-start',
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 4,
-    borderRadius: BorderRadius.full,
-    gap: 6,
-  },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  dotGreen: { backgroundColor: '#4ADE80' },
-  dotRed: { backgroundColor: Colors.error },
-  dotGray: { backgroundColor: Colors.textMuted },
-  connText: {
-    fontSize: 11,
-    color: Colors.textSecondary,
-    fontWeight: '500',
-  },
-  retryText: {
-    fontSize: 11,
-    color: Colors.primary,
-    fontWeight: 'bold',
-    textDecorationLine: 'underline',
   },
 });

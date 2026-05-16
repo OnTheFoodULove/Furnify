@@ -110,6 +110,7 @@ export default function ActivityLogScreen() {
         )}
         ListEmptyComponent={
           <EmptyState
+            image={require('../../../assets/images/empty-list.png')}
             title="No Activity Yet"
             subtitle="Admin actions like adding or editing furniture will appear here."
           />

@@ -25,33 +25,47 @@ export function validateImageAsset(imageAsset) {
     };
   }
 
-  // Check file type via URI extension
-  if (imageAsset.uri) {
-    const uri = imageAsset.uri.toLowerCase();
-    const hasValidExtension = ALLOWED_EXTENSIONS.some((ext) => uri.includes(ext));
-    if (!hasValidExtension) {
+  // Check MIME type if available (Primary source of truth)
+  if (imageAsset.mimeType) {
+    if (!ALLOWED_MIME_TYPES.includes(imageAsset.mimeType.toLowerCase())) {
       return {
         valid: false,
         message: 'Invalid file type. Please use JPG, PNG, or WebP images only',
       };
     }
-  }
-
-  // Check MIME type if available
-  if (imageAsset.mimeType && !ALLOWED_MIME_TYPES.includes(imageAsset.mimeType)) {
-    return {
-      valid: false,
-      message: 'Invalid file type. Please use JPG, PNG, or WebP images only',
-    };
+  } else if (imageAsset.uri) {
+    // Fallback: Check file type via URI extension if mimeType is missing
+    const uri = imageAsset.uri.toLowerCase();
+    
+    // Web uses blob: or data: URIs which don't have extensions
+    const isWebUri = uri.startsWith('blob:') || uri.startsWith('data:');
+    
+    if (!isWebUri) {
+      const hasValidExtension = ALLOWED_EXTENSIONS.some((ext) => uri.includes(ext));
+      if (!hasValidExtension) {
+        return {
+          valid: false,
+          message: 'Invalid file type. Please use JPG, PNG, or WebP images only',
+        };
+      }
+    }
   }
 
   return { valid: true, message: '' };
 }
 
 /**
- * Extract file extension from a URI
+ * Extract file extension from a URI or mimeType
  */
-export function getFileExtension(uri) {
+export function getFileExtension(uri, mimeType) {
+  if (mimeType) {
+    const parts = mimeType.split('/');
+    if (parts.length > 1) {
+      let ext = parts[1].toLowerCase();
+      if (ext === 'jpeg') ext = 'jpg';
+      return `.${ext}`;
+    }
+  }
   const parts = uri.split('.');
   if (parts.length > 1) {
     const ext = parts[parts.length - 1].toLowerCase().split('?')[0];
@@ -63,19 +77,21 @@ export function getFileExtension(uri) {
 /**
  * Generate a unique filename for Supabase Storage upload
  * @param {string} prefix - Prefix for the filename (e.g., 'furniture')
- * @param {string} uri - The image URI for extension detection
+ * @param {string} uri - The image URI
+ * @param {string} mimeType - Optional mimeType
  */
-export function generateStorageFileName(prefix, uri) {
-  const ext = getFileExtension(uri);
+export function generateStorageFileName(prefix, uri, mimeType) {
+  const ext = getFileExtension(uri, mimeType);
   const timestamp = Date.now();
   const random = Math.random().toString(36).substring(2, 8);
   return `${prefix}_${timestamp}_${random}${ext}`;
 }
 
 /**
- * Get the content type from a file URI
+ * Get the content type from a file URI or mimeType
  */
-export function getContentType(uri) {
+export function getContentType(uri, mimeType) {
+  if (mimeType) return mimeType;
   const ext = getFileExtension(uri);
   const types = {
     '.jpg': 'image/jpeg',

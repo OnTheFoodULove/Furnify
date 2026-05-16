@@ -6,6 +6,29 @@ const AuthContext = createContext(null);
 
 const MAX_LOGIN_ATTEMPTS = 5;
 const LOCKOUT_DURATION_MS = 5 * 60 * 1000; // 5 minutes
+const AUTH_TIMEOUT_MS = 30000; // 30 seconds (accommodates Supabase free-tier cold starts)
+
+/**
+ * Wraps a promise with a timeout. Rejects with a clear message if it takes too long.
+ */
+function withTimeout(promise, ms = AUTH_TIMEOUT_MS, label = 'Request') {
+  const timeout = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error(`${label} timed out. Please check your connection and try again.`)), ms)
+  );
+  return Promise.race([promise, timeout]);
+}
+
+/**
+ * Fire-and-forget ping to wake up the Supabase DB (free tier cold starts).
+ * This runs in parallel with the auth call so it doesn't block the UI.
+ */
+function wakeDatabase() {
+  supabase.from('users').select('count', { count: 'exact', head: true }).then(() => {
+    console.log('[AuthContext] DB wake-up ping sent');
+  }).catch(() => {
+    // Non-critical, ignore errors
+  });
+}
 
 export function AuthProvider({ children }) {
   const [session, setSession] = useState(null);
@@ -42,17 +65,34 @@ export function AuthProvider({ children }) {
 
   // Listen for auth state changes
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      if (session?.user) {
-        fetchProfile(session.user.id);
-      } else {
-        setLoading(false);
+    let mounted = true;
+
+    async function initializeAuth() {
+      try {
+        const { data: { session }, error } = await supabase.auth.getSession();
+        if (!mounted) return;
+        
+        if (error) throw error;
+        
+        setSession(session);
+        if (session?.user) {
+          await fetchProfile(session.user.id);
+        } else {
+          setLoading(false);
+        }
+      } catch (err) {
+        console.error('[AuthContext] Initial session check failed:', err);
+        if (mounted) setLoading(false);
       }
-    });
+    }
+
+    initializeAuth();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
+        if (!mounted) return;
+        console.log('[AuthContext] Auth state change:', event);
+        
         setSession(session);
         if (session?.user) {
           await fetchProfile(session.user.id);
@@ -64,11 +104,20 @@ export function AuthProvider({ children }) {
       }
     );
 
-    return () => subscription.unsubscribe();
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   async function fetchProfile(userId) {
+    if (!userId) {
+      setLoading(false);
+      return;
+    }
+    
     try {
+      console.log('[AuthContext] fetchProfile for:', userId);
       const { data, error } = await supabase
         .from('users')
         .select('*')
@@ -93,7 +142,9 @@ export function AuthProvider({ children }) {
 
         if (insertError) {
           console.error('[AuthContext] fallback profile insert failed:', insertError);
-          throw insertError;
+          // Even if insert fails, we need to stop the spinner
+          setLoading(false);
+          return;
         }
 
         // Re-fetch the newly created row
@@ -106,18 +157,18 @@ export function AuthProvider({ children }) {
         if (refetchError) throw refetchError;
         setProfile(newProfile);
         setUser(newProfile);
+        setLoading(false); // SUCCESS
         return;
       }
 
       if (error) throw error;
       setProfile(data);
       setUser(data);
+      setLoading(false); // SUCCESS
     } catch (err) {
       console.error('[AuthContext] fetchProfile error:', err);
-      // If profile fetch fails, we still want to stop loading
       setProfile(null);
-    } finally {
-      setLoading(false);
+      setLoading(false); // STOP SPINNER EVEN ON ERROR
     }
   }
 
@@ -183,53 +234,67 @@ export function AuthProvider({ children }) {
     try {
       console.log('[AuthContext] Calling supabase.auth.signInWithPassword...');
       
-      // Add a 15-second timeout to the Supabase call
-      const signInPromise = supabase.auth.signInWithPassword({ email, password });
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Sign in timed out')), 20000)
-      );
+      // Wake the DB in parallel (helps with free-tier cold starts)
+      wakeDatabase();
 
-      const { data, error } = await Promise.race([signInPromise, timeoutPromise]);
+      let data, error;
+      let lastErr;
+
+      // Retry up to 2 times (handles cold-start timeouts on free tier)
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        console.log(`[AuthContext] signIn attempt ${attempt}...`);
+        try {
+          ({ data, error } = await withTimeout(
+            supabase.auth.signInWithPassword({ email, password }),
+            AUTH_TIMEOUT_MS,
+            `Sign in (attempt ${attempt})`
+          ));
+          break; // success — exit the retry loop
+        } catch (timeoutErr) {
+          lastErr = timeoutErr;
+          console.warn(`[AuthContext] signIn attempt ${attempt} timed out:`, timeoutErr.message);
+          if (attempt < 2) {
+            console.log('[AuthContext] Retrying after 1s...');
+            await new Promise((res) => setTimeout(res, 1000));
+          }
+        }
+      }
+
+      // If both attempts timed out, throw the last error
+      if (!data && lastErr) throw lastErr;
       
       if (error) {
         console.error('[AuthContext] signIn error:', error.message);
         recordFailedAttempt(email);
+        // Provide a friendly message for email-not-confirmed case
+        if (error.message?.toLowerCase().includes('email not confirmed')) {
+          return { success: false, error: 'Please verify your email before signing in. Check your inbox for a confirmation link.' };
+        }
         return { success: false, error: 'Invalid email or password. Please try again.' };
       }
 
-      console.log('[AuthContext] signIn successful, fetching profile...');
+      console.log('[AuthContext] signIn successful');
       clearLoginAttempts(email);
-      
-      // We manually fetch profile here to return the role immediately
-      // Added a 10s timeout to this specific query
-      const profilePromise = supabase
-        .from('users')
-        .select('*')
-        .eq('id', data.user.id)
-        .single();
-        
-      const profileTimeout = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Profile fetch timed out')), 10000)
-      );
 
-      const { data: profileData, error: profileError } = await Promise.race([profilePromise, profileTimeout]);
-
-      if (profileError) {
-        console.error('[AuthContext] profile fetch error:', profileError.message);
-        
-        // If profile is missing, we might be able to still log them in if we know their role
-        // or we can try to create it as a last resort (though this usually requires RLS)
-        if (profileError.code === 'PGRST116') {
-           return { success: false, error: 'User profile not found. Please contact support.' };
+      // Get role from user_metadata as a fallback, but fetch the true role from the database
+      // so manual promotions in the Supabase Dashboard take immediate effect.
+      let role = data.user.user_metadata?.role || 'user';
+      try {
+        const { data: profile } = await supabase
+          .from('users')
+          .select('role')
+          .eq('id', data.user.id)
+          .single();
+          
+        if (profile?.role) {
+          role = profile.role;
         }
-        
-        return { success: false, error: `Profile error: ${profileError.message}` };
+      } catch (err) {
+        console.warn('[AuthContext] Could not fetch fresh role during signIn, using metadata fallback.');
       }
 
-      console.log('[AuthContext] profile loaded, role:', profileData.role);
-      setProfile(profileData);
-      setUser(profileData);
-      return { success: true, role: profileData.role };
+      console.log('[AuthContext] role from DB/metadata:', role);
+      return { success: true, role };
     } catch (err) {
       console.error('[AuthContext] unexpected signIn error:', err);
       return { 
@@ -246,31 +311,36 @@ export function AuthProvider({ children }) {
   async function signUp(email, password, username) {
     console.log('[AuthContext] signUp started for:', email);
     try {
-      // Add a 15-second timeout to the Supabase call
-      const signUpPromise = supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: { username, role: 'user' },
-        },
-      });
-
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Sign up timed out')), 15000)
+      const { data, error } = await withTimeout(
+        supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            data: { username, role: 'user' },
+          },
+        }),
+        AUTH_TIMEOUT_MS,
+        'Sign up'
       );
-
-      const { data, error } = await Promise.race([signUpPromise, timeoutPromise]);
 
       if (error) {
         console.error('[AuthContext] signUp error:', error.message);
-        if (error.message.includes('already registered')) {
-          return { success: false, error: 'An account with this email already exists.' };
+        if (error.message.includes('already registered') || error.message.includes('already been registered')) {
+          return { success: false, error: 'An account with this email already exists. Please sign in instead.' };
         }
         return { success: false, error: error.message || 'Failed to create account. Please try again.' };
       }
 
-      console.log('[AuthContext] signUp successful');
-      return { success: true };
+      // When email confirmation is ON, Supabase returns data.user but data.session === null.
+      // When the email is already registered (but unconfirmed), it also returns data.user with
+      // data.user.identities being an empty array.
+      if (data?.user?.identities?.length === 0) {
+        console.warn('[AuthContext] signUp: email already registered (unconfirmed)');
+        return { success: false, error: 'An account with this email already exists. Please sign in or check your inbox for a confirmation email.' };
+      }
+
+      console.log('[AuthContext] signUp successful, confirmation email sent:', !data?.session);
+      return { success: true, needsConfirmation: !data?.session };
     } catch (err) {
       console.error('[AuthContext] unexpected signUp error:', err);
       return { 

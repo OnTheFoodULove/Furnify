@@ -21,6 +21,23 @@ const { width } = Dimensions.get('window');
 
 const STATIC_COLORS = ['#C17F5E', '#2C2522', '#8A7F7A', '#F5F1EC'];
 
+// Helper: build a fake cart-item shape for Checkout when using Buy Now
+function buildSingleItemCart(item, quantity) {
+  return [
+    {
+      id: `buynow-${item.id}`,
+      quantity,
+      furniture: {
+        id: item.id,
+        name: item.name,
+        price: item.price,
+        image_url: item.image_url,
+        category: item.category,
+      },
+    },
+  ];
+}
+
 export default function FurnitureDetailScreen({ route, navigation }) {
   const { item } = route.params;
   const { user } = useAuth();
@@ -83,11 +100,13 @@ export default function FurnitureDetailScreen({ route, navigation }) {
   };
 
   const handleBuyNow = () => {
-    Toast.show({
-      type: 'info',
-      text1: 'Checkout Flow',
-      text2: 'This would normally open a payment gateway.',
-    });
+    if (!user) {
+      Toast.show({ type: 'info', text1: 'Please sign in to purchase items' });
+      return;
+    }
+    const fakeCart = buildSingleItemCart(item, quantity);
+    const total = item.price * quantity;
+    navigation.navigate('Checkout', { cartItems: fakeCart, total });
   };
 
   return (
@@ -106,7 +125,12 @@ export default function FurnitureDetailScreen({ route, navigation }) {
             <TouchableOpacity style={styles.roundBtn} onPress={() => navigation.goBack()}>
               <Ionicons name="arrow-back" size={24} color={Colors.text} />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.roundBtn}>
+            <TouchableOpacity
+              style={styles.roundBtn}
+              onPress={() =>
+                Toast.show({ type: 'info', text1: 'Wishlist', text2: 'Coming soon!' })
+              }
+            >
               <Ionicons name="heart-outline" size={24} color={Colors.text} />
             </TouchableOpacity>
           </View>
@@ -173,21 +197,27 @@ export default function FurnitureDetailScreen({ route, navigation }) {
       {/* Bottom Actions */}
       <View style={styles.bottomBar}>
         <View style={styles.actionRow}>
-           <TouchableOpacity 
+           <TouchableOpacity
              style={styles.tryInRoomBtn}
              onPress={() => navigation.navigate('ImagePlacement', { item })}
            >
-              <Ionicons name="scan-outline" size={24} color={Colors.primary} />
+             <Ionicons name="scan-outline" size={24} color={Colors.primary} />
            </TouchableOpacity>
-           
-           <View style={{ flex: 1, gap: Spacing.sm }}>
-              <Button
-                title="Add to Cart"
-                variant="primary"
-                loading={addingToCart}
-                onPress={handleAddToCart}
-                style={{ flex: 1 }}
-              />
+
+           <View style={styles.ctaButtons}>
+             <Button
+               title="Add to Cart"
+               variant="outline"
+               loading={addingToCart}
+               onPress={handleAddToCart}
+               style={styles.addToCartBtn}
+             />
+             <Button
+               title="Buy Now"
+               variant="primary"
+               onPress={handleBuyNow}
+               style={styles.buyNowBtn}
+             />
            </View>
         </View>
       </View>
@@ -327,6 +357,7 @@ const styles = StyleSheet.create({
   },
   actionRow: {
     flexDirection: 'row',
+    alignItems: 'center',
     gap: Spacing.md,
   },
   tryInRoomBtn: {
@@ -336,5 +367,17 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primarySurface,
     justifyContent: 'center',
     alignItems: 'center',
+    flexShrink: 0,
+  },
+  ctaButtons: {
+    flex: 1,
+    flexDirection: 'row',
+    gap: Spacing.sm,
+  },
+  addToCartBtn: {
+    flex: 1,
+  },
+  buyNowBtn: {
+    flex: 1,
   },
 });

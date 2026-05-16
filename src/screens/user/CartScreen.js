@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
   Text,
@@ -60,11 +61,15 @@ export default function CartScreen({ navigation }) {
     }
   }, [user]);
 
+  useFocusEffect(
+    useCallback(() => {
+      fetchCart();
+    }, [fetchCart])
+  );
+
   useEffect(() => {
-    fetchCart();
-    
     if (user) {
-      // Subscribe to real-time changes
+      // Subscribe to real-time changes as a fallback
       const channel = supabase
         .channel('user_cart')
         .on('postgres_changes', { 
@@ -136,11 +141,7 @@ export default function CartScreen({ navigation }) {
   };
 
   const handleCheckout = () => {
-    Toast.show({
-      type: 'info',
-      text1: 'Checkout Flow',
-      text2: 'This would open the checkout screen.',
-    });
+    navigation.navigate('Checkout', { cartItems, total });
   };
 
   if (!user) {

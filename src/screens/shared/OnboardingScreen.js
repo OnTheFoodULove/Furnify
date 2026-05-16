@@ -10,6 +10,7 @@ import {
   Dimensions,
   StatusBar,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors, Typography, Spacing, BorderRadius } from '../../theme';
 
 const { width, height } = Dimensions.get('window');
@@ -46,17 +47,24 @@ export default function OnboardingScreen({ navigation }) {
   const flatListRef = useRef(null);
   const scrollX = useRef(new Animated.Value(0)).current;
 
+  const markSeenAndNavigate = async () => {
+    try {
+      await AsyncStorage.setItem('furnify_has_seen_onboarding', 'true');
+    } catch { /* non-critical */ }
+    navigation.replace('AuthStack');
+  };
+
   const handleNext = () => {
     if (currentIndex < SLIDES.length - 1) {
       flatListRef.current?.scrollToIndex({ index: currentIndex + 1 });
       setCurrentIndex((i) => i + 1);
     } else {
-      navigation.replace('AuthStack');
+      markSeenAndNavigate();
     }
   };
 
   const handleSkip = () => {
-    navigation.replace('AuthStack');
+    markSeenAndNavigate();
   };
 
   const handleMomentumScrollEnd = (e) => {

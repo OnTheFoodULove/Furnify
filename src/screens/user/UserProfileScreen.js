@@ -78,29 +78,25 @@ export default function UserProfileScreen({ navigation }) {
         
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Account</Text>
-          
-          <View style={styles.actionList}>
-            <TouchableOpacity style={styles.actionItem}>
-              <Ionicons name="cube-outline" size={20} color={Colors.text} />
-              <Text style={styles.actionItemText}>My Orders</Text>
-              <Ionicons name="chevron-forward" size={20} color={Colors.border} />
-            </TouchableOpacity>
-            
+
+          <View style={styles.infoBox}>
+            <View style={styles.infoRow}>
+              <Ionicons name="shield-checkmark-outline" size={20} color={Colors.primary} />
+              <View style={styles.infoTextContainer}>
+                <Text style={styles.infoLabel}>Account Type</Text>
+                <Text style={styles.infoValue}>Customer</Text>
+              </View>
+            </View>
+
             <View style={styles.divider} />
-            
-            <TouchableOpacity style={styles.actionItem}>
-              <Ionicons name="heart-outline" size={20} color={Colors.text} />
-              <Text style={styles.actionItemText}>Wishlist</Text>
-              <Ionicons name="chevron-forward" size={20} color={Colors.border} />
-            </TouchableOpacity>
-            
-            <View style={styles.divider} />
-            
-            <TouchableOpacity style={styles.actionItem}>
-              <Ionicons name="settings-outline" size={20} color={Colors.text} />
-              <Text style={styles.actionItemText}>Settings</Text>
-              <Ionicons name="chevron-forward" size={20} color={Colors.border} />
-            </TouchableOpacity>
+
+            <View style={styles.infoRow}>
+              <Ionicons name="mail-outline" size={20} color={Colors.primary} />
+              <View style={styles.infoTextContainer}>
+                <Text style={styles.infoLabel}>Status</Text>
+                <Text style={styles.infoValue}>Active</Text>
+              </View>
+            </View>
           </View>
         </View>
 

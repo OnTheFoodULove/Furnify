@@ -110,6 +110,18 @@ on conflict (id) do nothing;
 -- 7. ROW LEVEL SECURITY (RLS)
 -- ─────────────────────────────────────────────
 
+-- Helper function to avoid infinite recursion when checking admin status
+create or replace function public.is_admin()
+returns boolean
+language sql
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from users where id = auth.uid() and role = 'admin'
+  );
+$$;
+
 -- Enable RLS on all tables
 alter table public.users         enable row level security;
 alter table public.furniture      enable row level security;
@@ -121,6 +133,7 @@ alter table public.activity_logs  enable row level security;
 drop policy if exists "Users can view their own profile" on public.users;
 drop policy if exists "Users can update their own profile" on public.users;
 drop policy if exists "Admins can view all users" on public.users;
+drop policy if exists "Users can insert their own profile" on public.users;
 
 create policy "Users can view their own profile"
   on public.users for select
@@ -130,14 +143,15 @@ create policy "Users can update their own profile"
   on public.users for update
   using (auth.uid() = id);
 
+-- IMPORTANT: This INSERT policy is required so the app's fallback profile creation
+-- works correctly if the on_auth_user_created trigger fails or is delayed.
+create policy "Users can insert their own profile"
+  on public.users for insert
+  with check (auth.uid() = id);
+
 create policy "Admins can view all users"
   on public.users for select
-  using (
-    exists (
-      select 1 from public.users u
-      where u.id = auth.uid() and u.role = 'admin'
-    )
-  );
+  using (public.is_admin());
 
 -- ── FURNITURE ──────────────────────────────
 drop policy if exists "Anyone can view visible furniture" on public.furniture;
@@ -151,40 +165,20 @@ create policy "Anyone can view visible furniture"
   on public.furniture for select
   using (
     is_hidden = false
-    or (
-      exists (
-        select 1 from public.users u
-        where u.id = auth.uid() and u.role = 'admin'
-      )
-    )
+    or public.is_admin()
   );
 
 create policy "Admins can insert furniture"
   on public.furniture for insert
-  with check (
-    exists (
-      select 1 from public.users u
-      where u.id = auth.uid() and u.role = 'admin'
-    )
-  );
+  with check (public.is_admin());
 
 create policy "Admins can update furniture"
   on public.furniture for update
-  using (
-    exists (
-      select 1 from public.users u
-      where u.id = auth.uid() and u.role = 'admin'
-    )
-  );
+  using (public.is_admin());
 
 create policy "Admins can delete furniture"
   on public.furniture for delete
-  using (
-    exists (
-      select 1 from public.users u
-      where u.id = auth.uid() and u.role = 'admin'
-    )
-  );
+  using (public.is_admin());
 
 -- ── CART ITEMS ─────────────────────────────
 drop policy if exists "Users can view their own cart" on public.cart_items;
@@ -214,21 +208,11 @@ drop policy if exists "Admins can insert activity logs" on public.activity_logs;
 
 create policy "Admins can view activity logs"
   on public.activity_logs for select
-  using (
-    exists (
-      select 1 from public.users u
-      where u.id = auth.uid() and u.role = 'admin'
-    )
-  );
+  using (public.is_admin());
 
 create policy "Admins can insert activity logs"
   on public.activity_logs for insert
-  with check (
-    exists (
-      select 1 from public.users u
-      where u.id = auth.uid() and u.role = 'admin'
-    )
-  );
+  with check (public.is_admin());
 
 -- ── STORAGE POLICIES ───────────────────────
 drop policy if exists "Public read furniture images" on storage.objects;
@@ -243,20 +227,14 @@ create policy "Admins can upload furniture images"
   on storage.objects for insert
   with check (
     bucket_id = 'furniture-images'
-    and exists (
-      select 1 from public.users u
-      where u.id = auth.uid() and u.role = 'admin'
-    )
+    and public.is_admin()
   );
 
 create policy "Admins can delete furniture images"
   on storage.objects for delete
   using (
     bucket_id = 'furniture-images'
-    and exists (
-      select 1 from public.users u
-      where u.id = auth.uid() and u.role = 'admin'
-    )
+    and public.is_admin()
   );
 
 -- ─────────────────────────────────────────────
