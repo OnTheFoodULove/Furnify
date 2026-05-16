@@ -14,6 +14,7 @@ import FurnitureDetailScreen from '../screens/user/FurnitureDetailScreen';
 import ImagePlacementScreen from '../screens/user/ImagePlacementScreen';
 import EditProfileScreen from '../screens/user/EditProfileScreen';
 import CheckoutScreen from '../screens/user/CheckoutScreen';
+import AssistantScreen from '../screens/user/AssistantScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
@@ -101,6 +102,8 @@ export default function UserNavigator() {
             iconName = focused ? 'home' : 'home-outline';
           } else if (route.name === 'Cart') {
             iconName = focused ? 'cart' : 'cart-outline';
+          } else if (route.name === 'Assistant') {
+            iconName = focused ? 'chatbubble-ellipses' : 'chatbubble-ellipses-outline';
           } else if (route.name === 'Profile') {
             iconName = focused ? 'person' : 'person-outline';
           }
@@ -131,6 +134,11 @@ export default function UserNavigator() {
     >
       <Tab.Screen name="Home" component={HomeStack} />
       <Tab.Screen name="Cart" component={CartStack} />
+      <Tab.Screen
+        name="Assistant"
+        component={AssistantScreen}
+        options={{ tabBarLabel: 'Fern AI' }}
+      />
       <Tab.Screen name="Profile" component={UserProfileStack} />
     </Tab.Navigator>
   );

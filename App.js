@@ -4,6 +4,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import Toast, { BaseToast, ErrorToast, InfoToast } from 'react-native-toast-message';
 import { AuthProvider } from './src/context/AuthContext';
+import { AgentProvider } from './src/context/AgentContext';
 import AppNavigator from './src/navigation/AppNavigator';
 import { Colors, Typography, BorderRadius } from './src/theme';
 
@@ -63,9 +64,11 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <AuthProvider>
-        <NavigationContainer>
-          <AppNavigator />
-        </NavigationContainer>
+        <AgentProvider>
+          <NavigationContainer>
+            <AppNavigator />
+          </NavigationContainer>
+        </AgentProvider>
       </AuthProvider>
       <Toast config={toastConfig} />
     </SafeAreaProvider>
