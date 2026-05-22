@@ -22,10 +22,11 @@ import LoadingOverlay from '../../components/LoadingOverlay';
 import { Colors, Typography, Spacing, BorderRadius, Shadows } from '../../theme';
 import {
   validateUsername,
+  validateEmail,
   validateMobile,
   validateAddress,
 } from '../../utils/validation';
-import { sanitizeName, sanitizeMobile, sanitizeText } from '../../utils/sanitize';
+import { sanitizeName, sanitizeEmail, sanitizeMobile, sanitizeText } from '../../utils/sanitize';
 import { validateImageAsset, generateStorageFileName, getContentType } from '../../utils/imageUtils';
 
 export default function EditProfileScreen({ navigation }) {
@@ -33,6 +34,7 @@ export default function EditProfileScreen({ navigation }) {
   
   const [form, setForm] = useState({
     username: profile?.username || '',
+    email: profile?.email || '',
     mobile_number: profile?.mobile_number || '',
     address: profile?.address || '',
   });
@@ -79,6 +81,11 @@ export default function EditProfileScreen({ navigation }) {
     const newErrors = {};
     const usernameResult = validateUsername(form.username);
     if (!usernameResult.valid) newErrors.username = usernameResult.message;
+
+    if (form.email && form.email.trim() !== '') {
+      const emailResult = validateEmail(form.email);
+      if (!emailResult.valid) newErrors.email = emailResult.message;
+    }
     
     // Only validate if they typed something (these fields are optional in DB, but good to validate if present)
     if (form.mobile_number && form.mobile_number.trim() !== '') {
@@ -118,6 +125,7 @@ export default function EditProfileScreen({ navigation }) {
       }
 
       const cleanUsername = sanitizeName(form.username);
+      const cleanEmail = sanitizeEmail(form.email);
       const cleanMobile = sanitizeMobile(form.mobile_number);
       const cleanAddress = sanitizeText(form.address);
 
@@ -125,10 +133,19 @@ export default function EditProfileScreen({ navigation }) {
         throw new Error('User profile not loaded. Please try again.');
       }
 
+      // Update email in Supabase Auth if changed
+      if (cleanEmail && cleanEmail !== profile?.email) {
+        const { error: emailError } = await supabase.auth.updateUser({ email: cleanEmail });
+        if (emailError) {
+          Toast.show({ type: 'info', text1: 'Email Update', text2: 'A verification email has been sent to your new address.' });
+        }
+      }
+
       const { error: updateError } = await supabase
         .from('users')
         .update({
           username: cleanUsername,
+          email: cleanEmail,
           mobile_number: cleanMobile,
           address: cleanAddress,
           avatar_url: finalAvatarUrl,
@@ -199,6 +216,17 @@ export default function EditProfileScreen({ navigation }) {
         </View>
 
         <View style={styles.form}>
+          {/* Full Name — read-only */}
+          <View style={styles.readOnlyField}>
+            <Input
+              label="Full Name"
+              value={profile?.full_name || 'Not set'}
+              editable={false}
+              leftIcon={<Ionicons name="id-card-outline" size={18} color={Colors.textMuted} />}
+            />
+            <Text style={styles.readOnlyHint}>Full name cannot be changed</Text>
+          </View>
+
           <Input
             label="Username"
             value={form.username}
@@ -206,17 +234,29 @@ export default function EditProfileScreen({ navigation }) {
             placeholder="johndoe"
             error={errors.username}
             returnKeyType="next"
-            onSubmitEditing={() => mobileRef.current?.focus()}
             autoCapitalize="none"
             leftIcon={<Ionicons name="person-outline" size={18} color={Colors.textSecondary} />}
           />
 
           <Input
+            label="Email"
+            value={form.email}
+            onChangeText={(v) => setField('email', v)}
+            placeholder="you@example.com"
+            keyboardType="email-address"
+            error={errors.email}
+            returnKeyType="next"
+            autoCapitalize="none"
+            onSubmitEditing={() => mobileRef.current?.focus()}
+            leftIcon={<Ionicons name="mail-outline" size={18} color={Colors.textSecondary} />}
+          />
+
+          <Input
             inputRef={mobileRef}
-            label="Mobile Number"
+            label="Phone Number"
             value={form.mobile_number}
             onChangeText={(v) => setField('mobile_number', v)}
-            placeholder="+1 234 567 8900"
+            placeholder="+63 917 123 4567"
             keyboardType="phone-pad"
             error={errors.mobile_number}
             returnKeyType="next"
@@ -317,6 +357,18 @@ const styles = StyleSheet.create({
   },
   form: { 
     marginBottom: Spacing.xl 
+  },
+  readOnlyField: {
+    opacity: 0.6,
+    marginBottom: Spacing.sm,
+  },
+  readOnlyHint: {
+    fontSize: Typography.size.xs,
+    color: Colors.textMuted,
+    marginTop: -Spacing.sm,
+    marginBottom: Spacing.md,
+    marginLeft: Spacing.xs,
+    fontStyle: 'italic',
   },
   saveBtn: { 
     marginTop: Spacing.sm 

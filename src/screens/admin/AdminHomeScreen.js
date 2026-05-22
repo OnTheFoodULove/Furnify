@@ -10,6 +10,9 @@ import {
   RefreshControl,
   StatusBar,
   ScrollView,
+  useWindowDimensions,
+  Alert,
+  Platform,
 } from 'react-native';
 import Toast from 'react-native-toast-message';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,9 +22,12 @@ import EmptyState from '../../components/EmptyState';
 import LoadingOverlay from '../../components/LoadingOverlay';
 import { Colors, Typography, Spacing, BorderRadius, Shadows } from '../../theme';
 
-const CATEGORIES = ['All', 'Living Room', 'Bedroom', 'Dining', 'Office', 'Outdoor'];
+const CATEGORIES = ['All', 'Living Room', 'Bedroom', 'Dining', 'Office', 'Outdoor', 'Kids'];
 
 export default function AdminHomeScreen({ navigation }) {
+  const { width } = useWindowDimensions();
+  const numColumns = width >= 1024 ? 4 : width >= 768 ? 3 : 2;
+
   const [furniture, setFurniture] = useState([]);
   const [filtered, setFiltered] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -86,26 +92,91 @@ export default function AdminHomeScreen({ navigation }) {
 
   const handleHideToggle = async (item) => {
     const newHidden = !item.is_hidden;
-    const action = newHidden ? 'DELETE' : 'ADD';
     const actionLabel = newHidden ? 'hidden' : 'shown';
 
     try {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('furniture')
         .update({ is_hidden: newHidden })
-        .eq('id', item.id);
+        .eq('id', item.id)
+        .select();
 
       if (error) throw error;
+      if (!data || data.length === 0) {
+        throw new Error('Access Denied: You do not have permission to hide/show this product.');
+      }
 
-      await logActivity(action, item.name);
+      await logActivity('EDIT', `${item.name} (${actionLabel})`);
       Toast.show({
         type: 'success',
         text1: `Item ${actionLabel}`,
         text2: `"${item.name}" is now ${actionLabel}.`,
       });
       fetchFurniture();
-    } catch {
-      Toast.show({ type: 'error', text1: 'Error', text2: 'Failed to update item visibility.' });
+    } catch (err) {
+      console.error('[AdminHomeScreen] handleHideToggle error:', err);
+      const errMsg = err.message || err.details || String(err);
+      Toast.show({
+        type: 'error',
+        text1: 'Error',
+        text2: `Failed to update item visibility: ${errMsg}`,
+      });
+    }
+  };
+
+  const handleDelete = async (item) => {
+    const performDelete = async () => {
+      setLoading(true);
+      try {
+        const { data, error } = await supabase
+          .from('furniture')
+          .delete()
+          .eq('id', item.id)
+          .select();
+
+        if (error) throw error;
+        if (!data || data.length === 0) {
+          throw new Error('Access Denied: You do not have permission to delete this product.');
+        }
+
+        await logActivity('DELETE', item.name);
+        Toast.show({
+          type: 'success',
+          text1: 'Product Deleted',
+          text2: `"${item.name}" has been removed.`,
+        });
+        fetchFurniture();
+      } catch (err) {
+        console.error('[AdminHomeScreen] handleDelete error:', err);
+        const errMsg = err.message || err.details || String(err);
+        Toast.show({
+          type: 'error',
+          text1: 'Failed to Delete',
+          text2: errMsg,
+        });
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      const confirmed = window.confirm(`Are you sure you want to delete "${item.name}"? This action cannot be undone.`);
+      if (confirmed) {
+        performDelete();
+      }
+    } else {
+      Alert.alert(
+        'Delete Product',
+        `Are you sure you want to delete "${item.name}"? This action cannot be undone.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Delete',
+            style: 'destructive',
+            onPress: performDelete,
+          },
+        ]
+      );
     }
   };
 
@@ -134,7 +205,8 @@ export default function AdminHomeScreen({ navigation }) {
           style={styles.addBtn}
           onPress={() => navigation.navigate('AddFurniture')}
         >
-          <Ionicons name="add" size={24} color={Colors.textInverse} />
+          <Ionicons name="add" size={18} color={Colors.textInverse} />
+          <Text style={styles.addBtnText}>Add Product</Text>
         </TouchableOpacity>
       </View>
 
@@ -142,15 +214,15 @@ export default function AdminHomeScreen({ navigation }) {
       <View style={styles.statsRow}>
         <View style={[styles.statCard, Shadows.sm]}>
           <Text style={styles.statNumber}>{stats.total}</Text>
-          <Text style={styles.statLabel}>Total</Text>
+          <Text style={styles.statLabel}>Total Products</Text>
         </View>
         <View style={[styles.statCard, Shadows.sm]}>
           <Text style={[styles.statNumber, { color: Colors.success }]}>{stats.visible}</Text>
-          <Text style={styles.statLabel}>Visible</Text>
+          <Text style={styles.statLabel}>Visible Products</Text>
         </View>
         <View style={[styles.statCard, Shadows.sm]}>
           <Text style={[styles.statNumber, { color: Colors.error }]}>{stats.hidden}</Text>
-          <Text style={styles.statLabel}>Hidden</Text>
+          <Text style={styles.statLabel}>Hidden Products</Text>
         </View>
       </View>
 
@@ -201,9 +273,12 @@ export default function AdminHomeScreen({ navigation }) {
 
       {/* Furniture list */}
       <FlatList
+        key={numColumns}
         data={filtered}
+        numColumns={numColumns}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
+        columnWrapperStyle={numColumns > 1 ? styles.gridRow : null}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={Colors.primary} />
         }
@@ -213,6 +288,7 @@ export default function AdminHomeScreen({ navigation }) {
             variant="admin"
             onEdit={handleEdit}
             onHide={handleHideToggle}
+            onDelete={handleDelete}
           />
         )}
         ListEmptyComponent={
@@ -254,13 +330,19 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   addBtn: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: Colors.primary,
-    justifyContent: 'center',
+    flexDirection: 'row',
     alignItems: 'center',
-    ...Shadows.md,
+    gap: Spacing.xs,
+    paddingHorizontal: Spacing.lg,
+    height: 42,
+    borderRadius: BorderRadius.md,
+    backgroundColor: Colors.primary,
+    ...Shadows.sm,
+  },
+  addBtnText: {
+    color: Colors.textInverse,
+    fontSize: Typography.size.sm,
+    fontWeight: Typography.weight.bold,
   },
   statsRow: {
     flexDirection: 'row',
@@ -327,7 +409,10 @@ const styles = StyleSheet.create({
     fontWeight: Typography.weight.semiBold,
   },
   listContent: {
-    paddingHorizontal: Spacing.xl,
+    paddingHorizontal: Spacing.xl - Spacing.xs,
     paddingBottom: Spacing.xxxl,
+  },
+  gridRow: {
+    justifyContent: 'flex-start',
   },
 });

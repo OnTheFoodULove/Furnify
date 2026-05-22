@@ -39,8 +39,11 @@ export default function UserProfileScreen({ navigation }) {
           </View>
 
           <Text style={styles.username}>{profile?.username || 'User'}</Text>
-          
-          <TouchableOpacity 
+          {profile?.full_name ? (
+            <Text style={styles.fullName}>{profile.full_name}</Text>
+          ) : null}
+
+          <TouchableOpacity
             style={styles.editBtn}
             onPress={() => navigation.navigate('EditProfile')}
           >
@@ -48,34 +51,48 @@ export default function UserProfileScreen({ navigation }) {
           </TouchableOpacity>
         </View>
 
+        {/* Contact Information */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Contact Information</Text>
-          
+
           <View style={styles.infoBox}>
-             <View style={styles.infoRow}>
-               <Ionicons name="call-outline" size={20} color={Colors.primary} />
-               <View style={styles.infoTextContainer}>
-                 <Text style={styles.infoLabel}>Mobile Number</Text>
-                 <Text style={styles.infoValue}>
-                   {profile?.mobile_number || 'Not provided'}
-                 </Text>
-               </View>
-             </View>
-             
-             <View style={styles.divider} />
-             
-             <View style={styles.infoRow}>
-               <Ionicons name="location-outline" size={20} color={Colors.primary} />
-               <View style={styles.infoTextContainer}>
-                 <Text style={styles.infoLabel}>Delivery Address</Text>
-                 <Text style={styles.infoValue}>
-                   {profile?.address || 'Not provided'}
-                 </Text>
-               </View>
-             </View>
+            <View style={styles.infoRow}>
+              <Ionicons name="mail-outline" size={20} color={Colors.primary} />
+              <View style={styles.infoTextContainer}>
+                <Text style={styles.infoLabel}>Email</Text>
+                <Text style={styles.infoValue}>
+                  {profile?.email || 'Not provided'}
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.divider} />
+
+            <View style={styles.infoRow}>
+              <Ionicons name="call-outline" size={20} color={Colors.primary} />
+              <View style={styles.infoTextContainer}>
+                <Text style={styles.infoLabel}>Phone Number</Text>
+                <Text style={styles.infoValue}>
+                  {profile?.mobile_number || 'Not provided'}
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.divider} />
+
+            <View style={styles.infoRow}>
+              <Ionicons name="location-outline" size={20} color={Colors.primary} />
+              <View style={styles.infoTextContainer}>
+                <Text style={styles.infoLabel}>Delivery Address</Text>
+                <Text style={styles.infoValue}>
+                  {profile?.address || 'Not provided'}
+                </Text>
+              </View>
+            </View>
           </View>
         </View>
-        
+
+        {/* Account */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Account</Text>
 
@@ -91,7 +108,7 @@ export default function UserProfileScreen({ navigation }) {
             <View style={styles.divider} />
 
             <View style={styles.infoRow}>
-              <Ionicons name="mail-outline" size={20} color={Colors.primary} />
+              <Ionicons name="ellipse" size={20} color={Colors.success} />
               <View style={styles.infoTextContainer}>
                 <Text style={styles.infoLabel}>Status</Text>
                 <Text style={styles.infoValue}>Active</Text>
@@ -104,12 +121,6 @@ export default function UserProfileScreen({ navigation }) {
           title="Sign Out"
           onPress={async () => {
             await signOut();
-            // Navigate to root navigator's AuthStack (tab navigator → HomeStack → root)
-            const rootNav = navigation.getParent()?.getParent() ?? navigation.getParent() ?? navigation;
-            rootNav.reset({
-              index: 0,
-              routes: [{ name: 'AuthStack' }],
-            });
           }}
           variant="ghost"
           icon={<Ionicons name="log-out-outline" size={20} color={Colors.error} />}
@@ -169,6 +180,11 @@ const styles = StyleSheet.create({
     fontSize: Typography.size.xl,
     fontWeight: Typography.weight.bold,
     color: Colors.text,
+    marginBottom: 2,
+  },
+  fullName: {
+    fontSize: Typography.size.base,
+    color: Colors.textSecondary,
     marginBottom: Spacing.md,
   },
   editBtn: {
@@ -177,6 +193,7 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.full,
     borderWidth: 1.5,
     borderColor: Colors.primary,
+    marginTop: Spacing.sm,
   },
   editBtnText: {
     fontSize: Typography.size.sm,
@@ -220,24 +237,6 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: Colors.border,
     marginVertical: Spacing.md,
-  },
-  actionList: {
-    backgroundColor: Colors.surface,
-    borderRadius: BorderRadius.md,
-    paddingHorizontal: Spacing.lg,
-    ...Shadows.sm,
-  },
-  actionItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: Spacing.lg,
-    gap: Spacing.md,
-  },
-  actionItemText: {
-    flex: 1,
-    fontSize: Typography.size.base,
-    color: Colors.text,
-    fontWeight: Typography.weight.medium,
   },
   signOutBtn: {
     marginTop: Spacing.md,

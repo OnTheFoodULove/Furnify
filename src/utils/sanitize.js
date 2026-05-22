@@ -109,3 +109,50 @@ export function sanitizeForm(formData, fieldTypes = {}) {
   }
   return sanitized;
 }
+
+/**
+ * Sanitize address: strip HTML, trim, normalize, basic length check
+ */
+export function sanitizeAddress(input) {
+  if (!input || typeof input !== 'string') return '';
+  return trimAndNormalize(stripHtml(input));
+}
+
+/**
+ * Sanitize alphanumeric characters and spaces
+ */
+export function sanitizeAlphanumericSpace(input) {
+  if (!input || typeof input !== 'string') return '';
+  return input.replace(/[^a-zA-Z0-9 ]/g, '');
+}
+
+/**
+ * Sanitize variant option choices (alphanumeric, spaces, hyphens, slashes)
+ */
+export function sanitizeVariantChoice(input) {
+  if (!input || typeof input !== 'string') return '';
+  return input.replace(/[^a-zA-Z0-9\-\/ ]/g, '');
+}
+
+/**
+ * Sanitize signed numeric input (allows optional leading + or - and digits with at most one decimal point)
+ */
+export function sanitizeSignedNumeric(input) {
+  if (input === null || input === undefined) return '';
+  let str = String(input);
+  // Keep only digits, +, -, and .
+  let cleaned = str.replace(/[^0-9+\-.]/g, '');
+  // Enforce at most one sign at the very beginning
+  if (cleaned.startsWith('+') || cleaned.startsWith('-')) {
+    cleaned = cleaned[0] + cleaned.substring(1).replace(/[+\-]/g, '');
+  } else {
+    cleaned = cleaned.replace(/[+\-]/g, '');
+  }
+  // Enforce at most one decimal point
+  const parts = cleaned.split('.');
+  if (parts.length > 2) {
+    cleaned = parts[0] + '.' + parts.slice(1).join('');
+  }
+  return cleaned;
+}
+

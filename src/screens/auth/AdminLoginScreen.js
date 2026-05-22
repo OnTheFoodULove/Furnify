@@ -28,6 +28,20 @@ export default function AdminLoginScreen({ navigation }) {
   const [lockoutMsg, setLockoutMsg] = useState('');
   const passwordRef = useRef(null);
 
+  // Admin panel is web-only
+  if (Platform.OS !== 'web') {
+    return (
+      <View style={styles.blockContainer}>
+        <StatusBar barStyle="dark-content" backgroundColor={Colors.background} />
+        <Text style={styles.blockIcon}>🖥️</Text>
+        <Text style={styles.blockTitle}>Desktop Only</Text>
+        <Text style={styles.blockMessage}>
+          The admin panel is only accessible from a desktop browser. Please visit Furnify on the web.
+        </Text>
+      </View>
+    );
+  }
+
   function validate() {
     const newErrors = {};
     const emailResult = validateEmail(email);
@@ -176,6 +190,28 @@ export default function AdminLoginScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: Colors.background },
+  blockContainer: {
+    flex: 1,
+    backgroundColor: Colors.background,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: Spacing.xl,
+  },
+  blockIcon: { fontSize: 56, marginBottom: Spacing.xl },
+  blockTitle: {
+    fontSize: Typography.size.xxl,
+    fontWeight: Typography.weight.bold,
+    color: Colors.text,
+    marginBottom: Spacing.md,
+    textAlign: 'center',
+  },
+  blockMessage: {
+    fontSize: Typography.size.base,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: Typography.size.base * 1.6,
+    maxWidth: 300,
+  },
   scrollContent: {
     flexGrow: 1,
     padding: Spacing.xl,

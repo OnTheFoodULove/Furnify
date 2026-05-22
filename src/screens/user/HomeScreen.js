@@ -9,6 +9,8 @@ import {
   RefreshControl,
   StatusBar,
   Image,
+  FlatList,
+  useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
@@ -18,9 +20,12 @@ import LoadingOverlay from '../../components/LoadingOverlay';
 import EmptyState from '../../components/EmptyState';
 import { Colors, Typography, Spacing, BorderRadius, Shadows } from '../../theme';
 
-const CATEGORIES = ['All', 'Living Room', 'Bedroom', 'Dining', 'Office', 'Outdoor'];
+const CATEGORIES = ['All', 'Living Room', 'Bedroom', 'Dining', 'Office', 'Outdoor', 'Kids'];
 
 export default function HomeScreen({ navigation }) {
+  const { width } = useWindowDimensions();
+  const numColumns = width >= 1024 ? 4 : width >= 768 ? 3 : 2;
+
   const { profile } = useAuth();
   const [furniture, setFurniture] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -114,68 +119,73 @@ export default function HomeScreen({ navigation }) {
       {/* Header outside ScrollView so it sticks */}
       {renderHeader()}
 
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
+      <FlatList
+        key={numColumns}
+        data={filteredFurniture}
+        numColumns={numColumns}
+        keyExtractor={(item) => item.id}
+        contentContainerStyle={styles.listContent}
+        columnWrapperStyle={numColumns > 1 ? styles.gridRow : null}
+        ListHeaderComponent={
+          <>
+            {renderBanner()}
+
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Categories</Text>
+            </View>
+
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.categoryScroll}
+              contentContainerStyle={styles.categoryContent}
+            >
+              {CATEGORIES.map((cat) => (
+                <TouchableOpacity
+                  key={cat}
+                  style={[
+                    styles.categoryChip,
+                    activeCategory === cat && styles.categoryChipActive,
+                  ]}
+                  onPress={() => setActiveCategory(cat)}
+                >
+                  <Text
+                    style={[
+                      styles.categoryText,
+                      activeCategory === cat && styles.categoryTextActive,
+                    ]}
+                  >
+                    {cat}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Products</Text>
+            </View>
+          </>
+        }
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={Colors.primary} />
         }
-      >
-        {renderBanner()}
-
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Categories</Text>
-        </View>
-
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.categoryScroll}
-          contentContainerStyle={styles.categoryContent}
-        >
-          {CATEGORIES.map((cat) => (
-            <TouchableOpacity
-              key={cat}
-              style={[
-                styles.categoryChip,
-                activeCategory === cat && styles.categoryChipActive,
-              ]}
-              onPress={() => setActiveCategory(cat)}
-            >
-              <Text
-                style={[
-                  styles.categoryText,
-                  activeCategory === cat && styles.categoryTextActive,
-                ]}
-              >
-                {cat}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-
-        <View style={styles.gridContainer}>
-          {filteredFurniture.length > 0 ? (
-            filteredFurniture.map((item) => (
-              <View key={item.id} style={styles.gridItem}>
-                <FurnitureCard
-                  item={item}
-                  variant="grid"
-                  onPress={() => navigation.navigate('FurnitureDetail', { item })}
-                />
-              </View>
-            ))
-          ) : (
-            <View style={styles.emptyContainer}>
-              <EmptyState
-                image={require('../../../assets/images/empty-list.png')}
-                title="Nothing here yet"
-                subtitle="We're adding new items soon. Check back later!"
-              />
-            </View>
-          )}
-        </View>
-      </ScrollView>
+        renderItem={({ item }) => (
+          <FurnitureCard
+            item={item}
+            variant="grid"
+            onPress={() => navigation.navigate('FurnitureDetail', { item })}
+          />
+        )}
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <EmptyState
+              image={require('../../../assets/images/empty-list.png')}
+              title="Nothing here yet"
+              subtitle="We're adding new items soon. Check back later!"
+            />
+          </View>
+        }
+      />
     </View>
   );
 }
@@ -213,7 +223,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     ...Shadows.sm,
   },
-  scrollContent: {
+  listContent: {
+    paddingHorizontal: Spacing.xl - Spacing.xs,
     paddingBottom: Spacing.xxxl,
   },
   banner: {
@@ -298,17 +309,11 @@ const styles = StyleSheet.create({
     color: Colors.textInverse,
     fontWeight: Typography.weight.bold,
   },
-  gridContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    paddingHorizontal: Spacing.xl,
-    justifyContent: 'space-between',
-  },
-  gridItem: {
-    marginBottom: Spacing.md,
-  },
   emptyContainer: {
     width: '100%',
     paddingTop: Spacing.xl,
+  },
+  gridRow: {
+    justifyContent: 'flex-start',
   },
 });

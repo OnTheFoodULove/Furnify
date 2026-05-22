@@ -127,11 +127,6 @@ export default function AdminProfileScreen({ navigation }) {
           title="Sign Out"
           onPress={async () => {
             await signOut();
-            const rootNav = navigation.getParent() ?? navigation;
-            rootNav.reset({
-              index: 0,
-              routes: [{ name: 'AuthStack' }],
-            });
           }}
           variant="outline"
           icon={<Ionicons name="log-out-outline" size={20} color={Colors.primary} />}

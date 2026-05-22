@@ -65,25 +65,32 @@ export default function UserNavigator() {
   useEffect(() => {
     if (!user) { setCartCount(0); return; }
 
+    const fetchCartCount = () => {
+      supabase
+        .from('cart_items')
+        .select('quantity')
+        .eq('user_id', user.id)
+        .then(({ data, error }) => {
+          if (error) {
+            console.error('[UserNavigator] fetchCartCount error:', error);
+            return;
+          }
+          const totalQty = data?.reduce((sum, item) => sum + (item.quantity || 0), 0) || 0;
+          setCartCount(totalQty);
+        });
+    };
+
     // Initial fetch
-    supabase
-      .from('cart_items')
-      .select('id', { count: 'exact', head: true })
-      .eq('user_id', user.id)
-      .then(({ count }) => setCartCount(count || 0));
+    fetchCartCount();
 
     // Real-time subscription for badge updates
     const channel = supabase
       .channel('cart_badge')
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'cart_items', filter: `user_id=eq.${user.id}` },
+        { event: '*', schema: 'public', table: 'cart_items' },
         () => {
-          supabase
-            .from('cart_items')
-            .select('id', { count: 'exact', head: true })
-            .eq('user_id', user.id)
-            .then(({ count }) => setCartCount(count || 0));
+          fetchCartCount();
         }
       )
       .subscribe();
@@ -95,6 +102,7 @@ export default function UserNavigator() {
     <Tab.Navigator
       screenOptions={({ route }) => ({
         headerShown: false,
+        tabBarHideOnKeyboard: true,
         tabBarIcon: ({ focused, color, size }) => {
           let iconName;
 
@@ -109,7 +117,7 @@ export default function UserNavigator() {
           }
 
           return (
-            <View>
+            <View style={{ overflow: 'visible' }}>
               <Ionicons name={iconName} size={size} color={color} />
               {route.name === 'Cart' && <CartBadge count={cartCount} />}
             </View>
@@ -122,9 +130,9 @@ export default function UserNavigator() {
           borderTopColor: Colors.border,
           elevation: 0,
           shadowOpacity: 0,
-          height: 60,
-          paddingBottom: 8,
-          paddingTop: 8,
+          height: 72,
+          paddingBottom: 14,
+          paddingTop: 10,
         },
         tabBarLabelStyle: {
           fontSize: 12,

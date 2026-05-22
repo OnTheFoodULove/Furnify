@@ -19,6 +19,9 @@ create table if not exists public.users (
   avatar_url   text,
   mobile_number text,
   address      text,
+  email        text,
+  full_name    text,
+  has_seen_onboarding boolean default false,
   created_at   timestamptz default now()
 );
 
@@ -57,6 +60,9 @@ create table if not exists public.furniture (
   description  text,
   category     text not null,
   is_hidden    boolean not null default false,
+  stock_quantity int not null default 0,
+  discount_percent numeric(5,2) default 0 check (discount_percent >= 0 and discount_percent <= 100),
+  variants     jsonb default '[]'::jsonb,
   created_at   timestamptz default now(),
   updated_at   timestamptz default now()
 );
@@ -236,6 +242,47 @@ create policy "Admins can delete furniture images"
     bucket_id = 'furniture-images'
     and public.is_admin()
   );
+
+-- ─── STORAGE: allow authenticated users to upload avatars ────
+drop policy if exists "Users can upload avatars" on storage.objects;
+create policy "Users can upload avatars"
+  on storage.objects for insert
+  with check (
+    bucket_id = 'furniture-images'
+    and auth.uid() is not null
+  );
+
+-- ─────────────────────────────────────────────
+-- 8. ORDERS TABLE & POLICIES
+-- ─────────────────────────────────────────────
+create table if not exists public.orders (
+  id              uuid primary key default uuid_generate_v4(),
+  user_id         uuid not null references public.users(id) on delete cascade,
+  items           jsonb not null,
+  total           numeric(10,2) not null,
+  delivery_address text not null,
+  contact_phone   text not null,
+  payment_method  text not null check (payment_method in ('COD', 'GCash', 'Bank Transfer')),
+  status          text not null default 'pending',
+  created_at      timestamptz default now()
+);
+
+alter table public.orders enable row level security;
+
+drop policy if exists "Users can view their own orders" on public.orders;
+create policy "Users can view their own orders"
+  on public.orders for select
+  using (auth.uid() = user_id);
+
+drop policy if exists "Users can insert their own orders" on public.orders;
+create policy "Users can insert their own orders"
+  on public.orders for insert
+  with check (auth.uid() = user_id);
+
+drop policy if exists "Admins can view all orders" on public.orders;
+create policy "Admins can view all orders"
+  on public.orders for select
+  using (public.is_admin());
 
 -- ─────────────────────────────────────────────
 -- Done! Your Furnify schema is ready.

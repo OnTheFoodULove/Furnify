@@ -29,6 +29,41 @@ export default function UserLoginScreen({ navigation }) {
   const [lockoutMsg, setLockoutMsg] = useState('');
   const passwordRef = useRef(null);
 
+  // User app is mobile-only
+  if (Platform.OS === 'web') {
+    return (
+      <View style={styles.blockContainer}>
+        <StatusBar barStyle="dark-content" backgroundColor={Colors.background} />
+        <Text style={styles.blockIcon}>📱</Text>
+        <Text style={styles.blockTitle}>Mobile App Only</Text>
+        <Text style={styles.blockMessage}>
+          Please download the Furnify mobile app to browse and shop. The web version is for administrators only.
+        </Text>
+        
+        <TouchableOpacity
+          style={{
+            marginTop: Spacing.xl,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 6,
+            paddingVertical: 10,
+            paddingHorizontal: 20,
+            borderRadius: BorderRadius.md,
+            backgroundColor: Colors.primarySurface,
+            borderWidth: 1.5,
+            borderColor: Colors.primary,
+          }}
+          onPress={() => navigation.navigate('AdminLogin')}
+        >
+          <Ionicons name="shield-checkmark" size={16} color={Colors.primary} />
+          <Text style={{ color: Colors.primary, fontWeight: '700', fontSize: 14 }}>
+            Admin? Sign in to Dashboard
+          </Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   function validate() {
     const newErrors = {};
     const emailResult = validateEmail(email);
@@ -65,8 +100,8 @@ export default function UserLoginScreen({ navigation }) {
         Toast.show({ type: 'success', text1: 'Welcome back!' });
       }
     } catch (err) {
-      console.error('[UserLoginScreen] handleLogin error:', err.message);
-      Toast.show({ type: 'error', text1: 'Login Error', text2: 'An unexpected error occurred.' });
+      console.error('[UserLoginScreen] handleLogin error:', err?.message || err);
+        Toast.show({ type: 'error', text1: 'Login Error', text2: err?.message || 'An unexpected error occurred.' });
     } finally {
       setLoading(false);
     }
@@ -172,6 +207,28 @@ export default function UserLoginScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: Colors.background },
+  blockContainer: {
+    flex: 1,
+    backgroundColor: Colors.background,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: Spacing.xl,
+  },
+  blockIcon: { fontSize: 56, marginBottom: Spacing.xl },
+  blockTitle: {
+    fontSize: Typography.size.xxl,
+    fontWeight: Typography.weight.bold,
+    color: Colors.text,
+    marginBottom: Spacing.md,
+    textAlign: 'center',
+  },
+  blockMessage: {
+    fontSize: Typography.size.base,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: Typography.size.base * 1.6,
+    maxWidth: 300,
+  },
   scrollContent: {
     flexGrow: 1,
     padding: Spacing.xl,

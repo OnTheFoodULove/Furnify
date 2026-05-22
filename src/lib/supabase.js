@@ -140,3 +140,14 @@ export async function logActivity(action, furnitureName) {
     // Non-critical: don't throw
   }
 }
+
+/**
+ * SECURITY NOTE:
+ * RLS policies for the new `orders` table are configured in supabase/schema.sql and supabase/migration_v2.sql:
+ * - "Users can view their own orders" (FOR SELECT USING (auth.uid() = user_id))
+ * - "Users can insert their own orders" (FOR INSERT WITH CHECK (auth.uid() = user_id))
+ * - "Admins can view all orders" (FOR SELECT USING (public.is_admin()))
+ *
+ * This ensures that users can never access or modify other users' order records,
+ * and admins have complete read-only visibility into placed orders.
+ */

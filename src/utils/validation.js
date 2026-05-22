@@ -82,8 +82,8 @@ export function validateFurnitureName(name) {
   if (name.trim().length > 100) {
     return { valid: false, message: 'Name must be 100 characters or fewer' };
   }
-  // Allow letters, numbers, spaces, hyphens, apostrophes, ampersands
-  if (!/^[a-zA-Z0-9\s\-'&.,]+$/.test(name.trim())) {
+  // Allow letters, numbers, spaces, and common keyboard/punctuation characters to prevent strict validation failures
+  if (!/^[a-zA-Z0-9\s\-'&.,()\[\]/:+\"#%;?!@]+$/.test(name.trim())) {
     return { valid: false, message: 'Name contains invalid characters' };
   }
   return { valid: true, message: '' };
@@ -165,3 +165,66 @@ export function validateRequired(value, fieldName = 'This field') {
   }
   return { valid: true, message: '' };
 }
+
+/**
+ * Validate stock quantity: non-negative integer
+ */
+export function validateStockQuantity(stock) {
+  if (stock === null || stock === undefined || stock === '') {
+    return { valid: false, message: 'Stock quantity is required' };
+  }
+  const num = parseInt(stock, 10);
+  if (isNaN(num)) {
+    return { valid: false, message: 'Stock must be a valid number' };
+  }
+  if (num < 0) {
+    return { valid: false, message: 'Stock cannot be negative' };
+  }
+  if (num > 99999) {
+    return { valid: false, message: 'Stock quantity is too high' };
+  }
+  return { valid: true, message: '' };
+}
+
+/**
+ * Validate discount percentage: 0-100
+ */
+export function validateDiscount(discount) {
+  if (discount === null || discount === undefined || discount === '') {
+    return { valid: true, message: '' }; // Optional field
+  }
+  const num = parseFloat(discount);
+  if (isNaN(num)) {
+    return { valid: false, message: 'Discount must be a valid number' };
+  }
+  if (num < 0 || num > 100) {
+    return { valid: false, message: 'Discount must be between 0 and 100' };
+  }
+  return { valid: true, message: '' };
+}
+
+/**
+ * Validate payment method
+ */
+export function validatePaymentMethod(method) {
+  if (!method || String(method).trim().length === 0) {
+    return { valid: false, message: 'Payment method is required' };
+  }
+  const allowed = ['COD', 'GCash', 'Bank Transfer'];
+  if (!allowed.includes(String(method).trim())) {
+    return { valid: false, message: 'Invalid payment method selected' };
+  }
+  return { valid: true, message: '' };
+}
+
+/**
+ * Validate variant image: required if other variant fields are filled
+ */
+export function validateVariantImage(imageAsset, hasOtherData) {
+  if (hasOtherData && (!imageAsset || !imageAsset.uri)) {
+    return { valid: false, message: 'Variant image is required when other fields are set' };
+  }
+  return { valid: true, message: '' };
+}
+
+

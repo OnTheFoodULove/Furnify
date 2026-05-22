@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
@@ -22,9 +22,17 @@ import { Colors, Typography, Spacing, BorderRadius, Shadows } from '../../theme'
 export default function CartScreen({ navigation }) {
   const { user } = useAuth();
   const [cartItems, setCartItems] = useState([]);
+  const [selectedItemIds, setSelectedItemIds] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [updatingId, setUpdatingId] = useState(null);
+  const prevCartCount = useRef(0);
+
+  const toggleSelectItem = (id) => {
+    setSelectedItemIds(prev =>
+      prev.includes(id) ? prev.filter(itemId => itemId !== id) : [...prev, id]
+    );
+  };
 
   const fetchCart = useCallback(async () => {
     if (!user) {
@@ -39,19 +47,36 @@ export default function CartScreen({ navigation }) {
         .select(`
           id,
           quantity,
+          selected_variant,
           furniture:furniture_id (
             id,
             name,
             price,
             image_url,
-            category
+            category,
+            discount_percent
           )
         `)
         .eq('user_id', user.id)
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
-      setCartItems(data || []);
+        if (error) throw error;
+        if (data) {
+          setCartItems(data);
+          setSelectedItemIds(prev => {
+            if (prev.length === 0) {
+              return data.map(item => item.id);
+            }
+            return prev.filter(id => data.some(item => item.id === id));
+          });
+          if (prevCartCount.current && data.length > prevCartCount.current) {
+            Toast.show({ type: 'success', text1: 'Item added to cart' });
+          }
+          prevCartCount.current = data.length;
+        } else {
+          setCartItems([]);
+          setSelectedItemIds([]);
+        }
     } catch (err) {
       console.error(err);
       Toast.show({ type: 'error', text1: 'Error fetching cart' });
@@ -75,8 +100,7 @@ export default function CartScreen({ navigation }) {
         .on('postgres_changes', { 
             event: '*', 
             schema: 'public', 
-            table: 'cart_items',
-            filter: `user_id=eq.${user.id}`
+            table: 'cart_items'
           }, 
           fetchCart
         )
@@ -134,14 +158,50 @@ export default function CartScreen({ navigation }) {
 
   const calculateTotal = () => {
     return cartItems.reduce((total, item) => {
-      // Handle cases where furniture might have been deleted but cart item exists
       if (!item.furniture) return total; 
-      return total + (item.furniture.price * item.quantity);
+      if (!selectedItemIds.includes(item.id)) return total;
+      
+      const discountedPrice =
+        item.furniture.discount_percent > 0
+          ? item.furniture.price * (1 - item.furniture.discount_percent / 100)
+          : null;
+      const baseEffectivePrice = discountedPrice ?? item.furniture.price;
+      const variantAdjustment = item.selected_variant?.price_adjustment || 0;
+      const effectivePrice = baseEffectivePrice + variantAdjustment;
+
+      return total + (effectivePrice * item.quantity);
     }, 0);
   };
 
   const handleCheckout = () => {
-    navigation.navigate('Checkout', { cartItems, total });
+    const checkedItems = cartItems.filter(item => selectedItemIds.includes(item.id));
+    if (checkedItems.length === 0) {
+      Toast.show({ type: 'info', text1: 'Please select items to checkout' });
+      return;
+    }
+
+    const mappedCheckedItems = checkedItems.map(item => {
+      const discountedPrice =
+        item.furniture.discount_percent > 0
+          ? item.furniture.price * (1 - item.furniture.discount_percent / 100)
+          : null;
+      const baseEffectivePrice = discountedPrice ?? item.furniture.price;
+      const variantAdjustment = item.selected_variant?.price_adjustment || 0;
+      const effectivePrice = baseEffectivePrice + variantAdjustment;
+
+      return {
+        ...item,
+        furniture: {
+          ...item.furniture,
+          name: item.selected_variant
+            ? `${item.furniture.name} (${item.selected_variant.name}: ${item.selected_variant.value})`
+            : item.furniture.name,
+          price: effectivePrice,
+        }
+      };
+    });
+
+    navigation.navigate('Checkout', { cartItems: mappedCheckedItems, total });
   };
 
   if (!user) {
@@ -180,17 +240,39 @@ export default function CartScreen({ navigation }) {
         renderItem={({ item }) => {
           if (!item.furniture) return null; // Skip if referenced furniture is missing
           
+          const discountedPrice =
+            item.furniture.discount_percent > 0
+              ? item.furniture.price * (1 - item.furniture.discount_percent / 100)
+              : null;
+          const baseEffectivePrice = discountedPrice ?? item.furniture.price;
+          const variantAdjustment = item.selected_variant?.price_adjustment || 0;
+          const effectivePrice = baseEffectivePrice + variantAdjustment;
+          
           return (
             <View style={[styles.cartItem, Shadows.sm]}>
+              <TouchableOpacity 
+                style={styles.checkboxContainer}
+                onPress={() => toggleSelectItem(item.id)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Ionicons 
+                  name={selectedItemIds.includes(item.id) ? "checkbox" : "square-outline"} 
+                  size={24} 
+                  color={selectedItemIds.includes(item.id) ? Colors.primary : Colors.textMuted} 
+                />
+              </TouchableOpacity>
+
               <TouchableOpacity 
                 style={styles.itemImageContainer}
                 onPress={() => navigation.navigate('FurnitureDetail', { item: item.furniture })}
               >
                 <Image
                   source={
-                    item.furniture.image_url
-                      ? { uri: item.furniture.image_url }
-                      : require('../../../assets/images/empty-list.png')
+                    item.selected_variant?.image_url
+                      ? { uri: item.selected_variant.image_url }
+                      : (item.furniture.image_url
+                        ? { uri: item.furniture.image_url }
+                        : require('../../../assets/images/empty-list.png'))
                   }
                   style={styles.itemImage}
                   resizeMode="cover"
@@ -211,9 +293,15 @@ export default function CartScreen({ navigation }) {
                 
                 <Text style={styles.itemCategory}>{item.furniture.category}</Text>
                 
+                {item.selected_variant && (
+                  <Text style={styles.itemVariant}>
+                    {item.selected_variant.name}: {item.selected_variant.value}
+                  </Text>
+                )}
+                
                 <View style={styles.itemFooterRow}>
                   <Text style={styles.itemPrice}>
-                    ${Number(item.furniture.price).toLocaleString()}
+                    ₱{Number(effectivePrice).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                   </Text>
                   
                   <View style={styles.quantityControl}>
@@ -259,7 +347,7 @@ export default function CartScreen({ navigation }) {
         <View style={styles.bottomBar}>
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Total:</Text>
-            <Text style={styles.summaryValue}>${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+            <Text style={styles.summaryValue}>₱{total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
           </View>
           <Button
             title="Checkout"
@@ -385,5 +473,16 @@ const styles = StyleSheet.create({
   },
   checkoutBtn: {
     width: '100%',
+  },
+  checkboxContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingRight: Spacing.sm,
+  },
+  itemVariant: {
+    fontSize: Typography.size.xs,
+    color: Colors.primary,
+    fontWeight: Typography.weight.medium,
+    marginTop: 2,
   },
 });

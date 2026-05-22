@@ -191,6 +191,9 @@ async function skillGetProductDetails({ product_id }) {
         price: data.price,
         description: data.description || 'No description available',
         image_url: data.image_url,
+        stock_quantity: data.stock_quantity,
+        discount_percent: data.discount_percent,
+        variants: data.variants,
       },
     };
   } catch (err) {
@@ -317,7 +320,7 @@ async function skillGetOrderHistory(args, userId) {
   try {
     const { data, error } = await supabase
       .from('orders')
-      .select('id, status, total_amount, created_at, delivery_address')
+      .select('id, status, total, created_at, delivery_address')
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
       .limit(3);
@@ -340,7 +343,7 @@ async function skillGetOrderHistory(args, userId) {
       orders: data.map((o) => ({
         id: o.id,
         status: o.status,
-        total: o.total_amount,
+        total: o.total,
         date: new Date(o.created_at).toLocaleDateString('en-PH', {
           year: 'numeric',
           month: 'long',

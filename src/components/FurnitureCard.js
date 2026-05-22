@@ -7,6 +7,7 @@ import {
   StyleSheet,
   Dimensions,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { Colors, Typography, BorderRadius, Spacing, Shadows } from '../theme';
 
 const { width } = Dimensions.get('window');
@@ -22,7 +23,13 @@ export default function FurnitureCard({
   variant = 'grid',
   onEdit,
   onHide,
+  onDelete,
 }) {
+  const discountedPrice =
+    item.discount_percent > 0
+      ? item.price * (1 - item.discount_percent / 100)
+      : null;
+
   if (variant === 'list') {
     return (
       <TouchableOpacity
@@ -42,7 +49,19 @@ export default function FurnitureCard({
         <View style={styles.listContent}>
           <Text style={styles.listCategory}>{item.category}</Text>
           <Text style={styles.listName} numberOfLines={2}>{item.name}</Text>
-          <Text style={styles.listPrice}>${Number(item.price).toLocaleString()}</Text>
+          {discountedPrice ? (
+            <View style={styles.priceRow}>
+              <Text style={styles.listPriceStrike}>₱{Number(item.price).toLocaleString()}</Text>
+              <Text style={styles.listPrice}>₱{Number(discountedPrice).toLocaleString(undefined, { maximumFractionDigits: 0 })}</Text>
+            </View>
+          ) : (
+            <Text style={styles.listPrice}>₱{Number(item.price).toLocaleString()}</Text>
+          )}
+          {item.stock_quantity !== undefined && (
+            <Text style={[styles.stockLabel, item.stock_quantity === 0 && styles.outOfStock]}>
+              {item.stock_quantity > 0 ? `In Stock: ${item.stock_quantity}` : 'Out of Stock'}
+            </Text>
+          )}
         </View>
       </TouchableOpacity>
     );
@@ -60,16 +79,39 @@ export default function FurnitureCard({
           style={styles.adminImage}
           resizeMode="cover"
         />
+        <TouchableOpacity
+          style={styles.deleteBtn}
+          onPress={() => onDelete?.(item)}
+        >
+          <Ionicons name="trash" size={15} color={Colors.error} />
+        </TouchableOpacity>
         {item.is_hidden && (
           <View style={styles.hiddenBadge}>
             <Text style={styles.hiddenBadgeText}>HIDDEN</Text>
+          </View>
+        )}
+        {item.discount_percent > 0 && !item.is_hidden && (
+          <View style={[styles.discountBadge, styles.discountBadgeLeft]}>
+            <Text style={styles.discountBadgeText}>-{item.discount_percent}%</Text>
           </View>
         )}
         <View style={styles.adminContent}>
           <View style={styles.adminInfo}>
             <Text style={styles.adminCategory}>{item.category}</Text>
             <Text style={styles.adminName} numberOfLines={1}>{item.name}</Text>
-            <Text style={styles.adminPrice}>${Number(item.price).toLocaleString()}</Text>
+            {discountedPrice ? (
+              <View style={styles.priceRow}>
+                <Text style={styles.adminPriceStrike}>₱{Number(item.price).toLocaleString()}</Text>
+                <Text style={styles.adminPrice}>₱{Number(discountedPrice).toLocaleString(undefined, { maximumFractionDigits: 0 })}</Text>
+              </View>
+            ) : (
+              <Text style={styles.adminPrice}>₱{Number(item.price).toLocaleString()}</Text>
+            )}
+            {item.stock_quantity !== undefined && (
+              <Text style={[styles.adminStock, item.stock_quantity === 0 && styles.outOfStock]}>
+                Stock: {item.stock_quantity}
+              </Text>
+            )}
           </View>
           <View style={styles.adminActions}>
             <TouchableOpacity
@@ -109,11 +151,28 @@ export default function FurnitureCard({
           style={styles.gridImage}
           resizeMode="cover"
         />
+        {item.discount_percent > 0 && (
+          <View style={styles.discountBadge}>
+            <Text style={styles.discountBadgeText}>-{item.discount_percent}%</Text>
+          </View>
+        )}
       </View>
       <View style={styles.gridContent}>
         <Text style={styles.gridCategory}>{item.category}</Text>
         <Text style={styles.gridName} numberOfLines={2}>{item.name}</Text>
-        <Text style={styles.gridPrice}>${Number(item.price).toLocaleString()}</Text>
+        {discountedPrice ? (
+          <View style={styles.priceRow}>
+            <Text style={styles.gridPriceStrike}>₱{Number(item.price).toLocaleString()}</Text>
+            <Text style={styles.gridPrice}>₱{Number(discountedPrice).toLocaleString(undefined, { maximumFractionDigits: 0 })}</Text>
+          </View>
+        ) : (
+          <Text style={styles.gridPrice}>₱{Number(item.price).toLocaleString()}</Text>
+        )}
+        {item.stock_quantity !== undefined && (
+          <Text style={[styles.stockLabel, item.stock_quantity === 0 && styles.outOfStock]}>
+            {item.stock_quantity > 0 ? `In Stock: ${item.stock_quantity}` : 'Out of Stock'}
+          </Text>
+        )}
       </View>
     </TouchableOpacity>
   );
@@ -122,7 +181,8 @@ export default function FurnitureCard({
 const styles = StyleSheet.create({
   // Grid card
   gridCard: {
-    width: CARD_WIDTH,
+    flex: 1,
+    margin: Spacing.xs,
     backgroundColor: Colors.surface,
     borderRadius: BorderRadius.lg,
     overflow: 'hidden',
@@ -130,18 +190,19 @@ const styles = StyleSheet.create({
   },
   gridImageContainer: {
     width: '100%',
-    aspectRatio: 1,
+    aspectRatio: 1.1, // slightly wider aspect ratio for a more compact grid look
     backgroundColor: Colors.surfaceElevated,
+    position: 'relative',
   },
   gridImage: {
     width: '100%',
     height: '100%',
   },
   gridContent: {
-    padding: Spacing.md,
+    padding: Spacing.sm,
   },
   gridCategory: {
-    fontSize: Typography.size.xs,
+    fontSize: 10,
     color: Colors.primary,
     fontWeight: Typography.weight.semiBold,
     textTransform: 'uppercase',
@@ -149,16 +210,22 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   gridName: {
-    fontSize: Typography.size.sm,
+    fontSize: Typography.size.sm - 1,
     color: Colors.text,
     fontWeight: Typography.weight.semiBold,
-    marginBottom: Spacing.xs,
-    lineHeight: 18,
+    marginBottom: 4,
+    lineHeight: 16,
   },
   gridPrice: {
-    fontSize: Typography.size.base,
+    fontSize: Typography.size.sm,
     color: Colors.primary,
     fontWeight: Typography.weight.bold,
+  },
+  gridPriceStrike: {
+    fontSize: Typography.size.xs - 1,
+    color: Colors.textMuted,
+    textDecorationLine: 'line-through',
+    marginRight: 4,
   },
 
   // List card
@@ -198,9 +265,17 @@ const styles = StyleSheet.create({
     color: Colors.primary,
     fontWeight: Typography.weight.bold,
   },
+  listPriceStrike: {
+    fontSize: Typography.size.xs,
+    color: Colors.textMuted,
+    textDecorationLine: 'line-through',
+    marginRight: 4,
+  },
 
   // Admin card
   adminCard: {
+    flex: 1,
+    margin: Spacing.xs,
     backgroundColor: Colors.surface,
     borderRadius: BorderRadius.lg,
     overflow: 'hidden',
@@ -211,36 +286,36 @@ const styles = StyleSheet.create({
   },
   adminImage: {
     width: '100%',
-    height: 180,
+    height: 130,
     backgroundColor: Colors.surfaceElevated,
   },
   hiddenBadge: {
     position: 'absolute',
-    top: Spacing.md,
-    right: Spacing.md,
+    top: Spacing.xs,
+    right: Spacing.xs,
     backgroundColor: Colors.error,
     borderRadius: BorderRadius.sm,
     paddingHorizontal: Spacing.sm,
-    paddingVertical: 3,
+    paddingVertical: 2,
   },
   hiddenBadgeText: {
-    fontSize: Typography.size.xs,
+    fontSize: 10,
     color: Colors.textInverse,
     fontWeight: Typography.weight.bold,
     letterSpacing: 0.5,
   },
   adminContent: {
-    padding: Spacing.md,
-    flexDirection: 'row',
-    alignItems: 'center',
+    padding: Spacing.sm,
+    flexDirection: 'column',
+    alignItems: 'stretch',
     justifyContent: 'space-between',
+    flex: 1,
   },
   adminInfo: {
-    flex: 1,
-    marginRight: Spacing.md,
+    marginBottom: Spacing.sm,
   },
   adminCategory: {
-    fontSize: Typography.size.xs,
+    fontSize: 10,
     color: Colors.primary,
     fontWeight: Typography.weight.semiBold,
     textTransform: 'uppercase',
@@ -248,23 +323,37 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   adminName: {
-    fontSize: Typography.size.base,
+    fontSize: Typography.size.sm,
     color: Colors.text,
     fontWeight: Typography.weight.semiBold,
     marginBottom: 2,
   },
   adminPrice: {
-    fontSize: Typography.size.md,
+    fontSize: Typography.size.sm,
     color: Colors.primary,
     fontWeight: Typography.weight.bold,
   },
+  adminPriceStrike: {
+    fontSize: Typography.size.xs - 1,
+    color: Colors.textMuted,
+    textDecorationLine: 'line-through',
+    marginRight: 4,
+  },
+  adminStock: {
+    fontSize: Typography.size.xs - 1,
+    color: Colors.textSecondary,
+    marginTop: 2,
+  },
   adminActions: {
     flexDirection: 'row',
-    gap: Spacing.sm,
+    gap: Spacing.xs,
+    width: '100%',
   },
   actionBtn: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm - 1,
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: Spacing.xs + 2,
     borderRadius: BorderRadius.sm,
     borderWidth: 1.5,
   },
@@ -294,5 +383,58 @@ const styles = StyleSheet.create({
     color: Colors.success,
     fontSize: Typography.size.sm,
     fontWeight: Typography.weight.semiBold,
+  },
+
+  // Shared
+  discountBadge: {
+    position: 'absolute',
+    top: Spacing.sm,
+    right: Spacing.sm,
+    backgroundColor: Colors.error,
+    borderRadius: BorderRadius.sm,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 2,
+    zIndex: 2,
+  },
+  discountBadgeLeft: {
+    right: undefined,
+    left: Spacing.md,
+    top: Spacing.md,
+  },
+  discountBadgeText: {
+    fontSize: Typography.size.xs,
+    color: Colors.textInverse,
+    fontWeight: Typography.weight.bold,
+  },
+  priceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+  },
+  stockLabel: {
+    fontSize: 10,
+    color: Colors.success,
+    fontWeight: Typography.weight.medium,
+    marginTop: 2,
+  },
+  outOfStock: {
+    color: Colors.error,
+  },
+  deleteBtn: {
+    position: 'absolute',
+    top: Spacing.xs,
+    left: Spacing.xs,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.15,
+    shadowRadius: 3,
+    elevation: 3,
   },
 });

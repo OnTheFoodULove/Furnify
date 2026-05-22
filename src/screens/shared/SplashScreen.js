@@ -7,6 +7,7 @@ import {
   Animated,
   StatusBar,
   Dimensions,
+  Platform,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../../context/AuthContext';
@@ -53,26 +54,20 @@ export default function SplashScreen({ navigation }) {
   useEffect(() => {
     let timer;
 
-    // Max splash duration — safety net: if loading hangs, go to onboarding
-    const maxWait = setTimeout(() => {
-      navigation.replace('Onboarding');
-    }, 4000);
-
     if (!loading) {
-      clearTimeout(maxWait);
       timer = setTimeout(async () => {
         // AppNavigator handles authenticated routes automatically by re-rendering.
         // SplashScreen only needs to route unauthenticated users.
         if (!session || !profile) {
           try {
             const seen = await AsyncStorage.getItem('furnify_has_seen_onboarding');
-            if (seen) {
+            if (seen || Platform.OS === 'web') {
               navigation.replace('AuthStack');
             } else {
               navigation.replace('Onboarding');
             }
           } catch {
-            navigation.replace('Onboarding');
+            navigation.replace(Platform.OS === 'web' ? 'AuthStack' : 'Onboarding');
           }
         }
         // If session + profile exist, AppNavigator already swapped the stack —
@@ -81,7 +76,6 @@ export default function SplashScreen({ navigation }) {
     }
 
     return () => {
-      clearTimeout(maxWait);
       if (timer) clearTimeout(timer);
     };
   }, [loading, session, profile]);

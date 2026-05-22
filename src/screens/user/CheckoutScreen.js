@@ -13,23 +13,85 @@ import Toast from 'react-native-toast-message';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
 import Button from '../../components/Button';
+import Input from '../../components/Input';
 import { Colors, Typography, Spacing, BorderRadius, Shadows } from '../../theme';
+import { validateRequired, validateMobile, validateAddress, validatePaymentMethod } from '../../utils/validation';
+import { sanitizeText, sanitizeMobile, sanitizeAddress } from '../../utils/sanitize';
 
 export default function CheckoutScreen({ route, navigation }) {
   const { cartItems = [], total = 0 } = route.params || {};
   const { profile } = useAuth();
   const [placing, setPlacing] = useState(false);
   const [placed, setPlaced] = useState(false);
+  const [form, setForm] = useState({
+    delivery_address: profile?.address || '',
+    contact_phone: profile?.mobile_number || '',
+    payment_method: '',
+  });
+  const [errors, setErrors] = useState({});
+
+  const PAYMENT_METHODS = ['COD', 'GCash', 'Bank Transfer'];
+
+  const validateForm = () => {
+    const newErrors = {};
+    const addrResult = validateAddress(form.delivery_address);
+    if (!addrResult.valid) newErrors.delivery_address = addrResult.message;
+    const phoneResult = validateMobile(form.contact_phone);
+    if (!phoneResult.valid) newErrors.contact_phone = phoneResult.message;
+    const payResult = validatePaymentMethod(form.payment_method);
+    if (!payResult.valid) newErrors.payment_method = payResult.message;
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
 
   const handlePlaceOrder = async () => {
+    if (!validateForm()) return;
     setPlacing(true);
     try {
-      // Clear the cart after "placing" order
-      // Only delete real cart items (filter out fake 'buynow-' IDs from direct Buy Now purchases)
+      // 1. Validate real-time stock levels before placing order
+      for (const item of cartItems) {
+        if (!item.furniture?.id) continue;
+        
+        const { data: freshItem, error: fetchError } = await supabase
+          .from('furniture')
+          .select('stock_quantity, name')
+          .eq('id', item.furniture.id)
+          .single();
+          
+        if (fetchError) throw fetchError;
+        
+        if (!freshItem) {
+          throw new Error(`Product "${item.furniture.name}" no longer exists in our catalog.`);
+        }
+        
+        if (freshItem.stock_quantity < item.quantity) {
+          throw new Error(`Insufficient stock for "${freshItem.name}". Only ${freshItem.stock_quantity} remaining.`);
+        }
+      }
+
+      // 2. Insert order
+      const orderItems = cartItems.map(item => ({
+        furniture_id: item.furniture?.id,
+        name: item.furniture?.name,
+        price: item.furniture?.price,
+        quantity: item.quantity,
+      }));
+
+      const { error: orderError } = await supabase.from('orders').insert({
+        user_id: profile.id,
+        items: orderItems,
+        total,
+        delivery_address: sanitizeText(form.delivery_address),
+        contact_phone: sanitizeMobile(form.contact_phone),
+        payment_method: form.payment_method,
+      });
+
+      if (orderError) throw orderError;
+
+      // 3. Clear the cart
       const ids = cartItems
         .map((item) => item.id)
         .filter((id) => !String(id).startsWith('buynow-'));
-        
       if (ids.length > 0) {
         const { error } = await supabase
           .from('cart_items')
@@ -40,7 +102,7 @@ export default function CheckoutScreen({ route, navigation }) {
       setPlaced(true);
     } catch (err) {
       console.error('[CheckoutScreen] placeOrder error:', err.message);
-      Toast.show({ type: 'error', text1: 'Order Failed', text2: 'Please try again.' });
+      Toast.show({ type: 'error', text1: 'Order Failed', text2: err.message || 'Please try again.' });
     } finally {
       setPlacing(false);
     }
@@ -73,9 +135,6 @@ export default function CheckoutScreen({ route, navigation }) {
   }
 
   // ── Checkout Form ────────────────────────────────────────────────
-  const shippingAddress = profile?.address || 'No address saved';
-  const mobileNumber = profile?.mobile_number || 'No mobile number saved';
-  const hasAddress = !!profile?.address;
 
   return (
     <View style={styles.container}>
@@ -98,54 +157,32 @@ export default function CheckoutScreen({ route, navigation }) {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Delivery Details</Text>
           <View style={[styles.card, Shadows.sm]}>
-            <View style={styles.infoRow}>
-              <View style={[styles.iconCircle, { backgroundColor: Colors.primarySurface }]}>
-                <Ionicons name="person-outline" size={18} color={Colors.primary} />
-              </View>
-              <View style={styles.infoText}>
-                <Text style={styles.infoLabel}>Name</Text>
-                <Text style={styles.infoValue}>{profile?.username || 'User'}</Text>
-              </View>
-            </View>
-
-            <View style={styles.divider} />
-
-            <View style={styles.infoRow}>
-              <View style={[styles.iconCircle, { backgroundColor: Colors.primarySurface }]}>
-                <Ionicons name="location-outline" size={18} color={Colors.primary} />
-              </View>
-              <View style={styles.infoText}>
-                <Text style={styles.infoLabel}>Shipping Address</Text>
-                <Text style={[styles.infoValue, !hasAddress && styles.missingValue]}>
-                  {shippingAddress}
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.divider} />
-
-            <View style={styles.infoRow}>
-              <View style={[styles.iconCircle, { backgroundColor: Colors.primarySurface }]}>
-                <Ionicons name="call-outline" size={18} color={Colors.primary} />
-              </View>
-              <View style={styles.infoText}>
-                <Text style={styles.infoLabel}>Mobile</Text>
-                <Text style={[styles.infoValue, !profile?.mobile_number && styles.missingValue]}>
-                  {mobileNumber}
-                </Text>
-              </View>
-            </View>
+            <Input
+              label="Delivery Address"
+              value={form.delivery_address}
+              onChangeText={(v) => {
+                setForm(f => ({ ...f, delivery_address: v }));
+                if (errors.delivery_address) setErrors(e => ({ ...e, delivery_address: undefined }));
+              }}
+              placeholder="Enter your full delivery address"
+              multiline
+              numberOfLines={2}
+              error={errors.delivery_address}
+              leftIcon={<Ionicons name="location-outline" size={18} color={Colors.textSecondary} />}
+            />
+            <Input
+              label="Contact Phone"
+              value={form.contact_phone}
+              onChangeText={(v) => {
+                setForm(f => ({ ...f, contact_phone: v }));
+                if (errors.contact_phone) setErrors(e => ({ ...e, contact_phone: undefined }));
+              }}
+              placeholder="e.g. +63 917 123 4567"
+              keyboardType="phone-pad"
+              error={errors.contact_phone}
+              leftIcon={<Ionicons name="call-outline" size={18} color={Colors.textSecondary} />}
+            />
           </View>
-
-          {!hasAddress && (
-            <TouchableOpacity
-              style={styles.editAddressBtn}
-              onPress={() => navigation.navigate('Profile')}
-            >
-              <Ionicons name="create-outline" size={16} color={Colors.primary} />
-              <Text style={styles.editAddressText}>Add shipping address in Profile</Text>
-            </TouchableOpacity>
-          )}
         </View>
 
         {/* Order Summary */}
@@ -166,7 +203,7 @@ export default function CheckoutScreen({ route, navigation }) {
                       </Text>
                     </View>
                     <Text style={styles.orderItemPrice}>
-                      ${(item.furniture.price * item.quantity).toLocaleString(undefined, {
+                      ₱{(item.furniture.price * item.quantity).toLocaleString(undefined, {
                         minimumFractionDigits: 2,
                         maximumFractionDigits: 2,
                       })}
@@ -179,19 +216,38 @@ export default function CheckoutScreen({ route, navigation }) {
           </View>
         </View>
 
-        {/* Payment Method (display-only) */}
+        {/* Payment Method */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Payment Method</Text>
           <View style={[styles.card, Shadows.sm]}>
-            <View style={styles.infoRow}>
-              <View style={[styles.iconCircle, { backgroundColor: '#EEF2FF' }]}>
-                <Ionicons name="card-outline" size={18} color="#6366F1" />
-              </View>
-              <View style={styles.infoText}>
-                <Text style={styles.infoValue}>Cash on Delivery</Text>
-                <Text style={styles.infoLabel}>Pay when your order arrives</Text>
-              </View>
-            </View>
+            {PAYMENT_METHODS.map((method) => (
+              <TouchableOpacity
+                key={method}
+                style={[
+                  styles.paymentOption,
+                  form.payment_method === method && styles.paymentOptionActive,
+                ]}
+                onPress={() => {
+                  setForm(f => ({ ...f, payment_method: method }));
+                  if (errors.payment_method) setErrors(e => ({ ...e, payment_method: undefined }));
+                }}
+              >
+                <Ionicons
+                  name={form.payment_method === method ? 'radio-button-on' : 'radio-button-off'}
+                  size={20}
+                  color={form.payment_method === method ? Colors.primary : Colors.textMuted}
+                />
+                <Text style={[
+                  styles.paymentOptionText,
+                  form.payment_method === method && styles.paymentOptionTextActive,
+                ]}>
+                  {method}
+                </Text>
+              </TouchableOpacity>
+            ))}
+            {errors.payment_method && (
+              <Text style={styles.paymentError}>{errors.payment_method}</Text>
+            )}
           </View>
         </View>
 
@@ -201,7 +257,7 @@ export default function CheckoutScreen({ route, navigation }) {
             <View style={styles.priceRow}>
               <Text style={styles.priceLabel}>Subtotal</Text>
               <Text style={styles.priceValue}>
-                ${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                ₱{total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </Text>
             </View>
             <View style={styles.divider} />
@@ -213,7 +269,7 @@ export default function CheckoutScreen({ route, navigation }) {
             <View style={styles.priceRow}>
               <Text style={styles.priceTotalLabel}>Total</Text>
               <Text style={styles.priceTotalValue}>
-                ${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                ₱{total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </Text>
             </View>
           </View>
@@ -225,7 +281,7 @@ export default function CheckoutScreen({ route, navigation }) {
         <View style={styles.bottomTotal}>
           <Text style={styles.bottomTotalLabel}>Total</Text>
           <Text style={styles.bottomTotalValue}>
-            ${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            ₱{total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </Text>
         </View>
         <Button
@@ -411,6 +467,35 @@ const styles = StyleSheet.create({
     color: Colors.text,
   },
   placeOrderBtn: {},
+  paymentOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    paddingVertical: Spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  paymentOptionActive: {
+    backgroundColor: Colors.primarySurface,
+    marginHorizontal: -Spacing.lg,
+    paddingHorizontal: Spacing.lg,
+    borderRadius: BorderRadius.md,
+    borderBottomWidth: 0,
+  },
+  paymentOptionText: {
+    fontSize: Typography.size.base,
+    color: Colors.textSecondary,
+    fontWeight: Typography.weight.medium,
+  },
+  paymentOptionTextActive: {
+    color: Colors.primary,
+    fontWeight: Typography.weight.bold,
+  },
+  paymentError: {
+    fontSize: Typography.size.xs,
+    color: Colors.error,
+    marginTop: Spacing.sm,
+  },
   // Success state
   successContainer: {
     flex: 1,

@@ -41,15 +41,6 @@ export function AuthProvider({ children }) {
   // Handle app state changes for session refresh
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextAppState) => {
-      if (
-        appState.current.match(/inactive|background/) &&
-        nextAppState === 'active'
-      ) {
-        // Supabase v2 handles refresh automatically if configured
-        // supabase.auth.startAutoRefresh(); 
-      } else {
-        // supabase.auth.stopAutoRefresh();
-      }
       appState.current = nextAppState;
     });
     return () => subscription.remove();
@@ -128,7 +119,6 @@ export function AuthProvider({ children }) {
       if (error && error.code === 'PGRST116') {
         console.warn('[AuthContext] No profile row found — creating fallback profile...');
         
-        // Get auth user metadata to populate the new row
         const { data: { user: authUser } } = await supabase.auth.getUser();
         const username =
           authUser?.user_metadata?.username ||
@@ -142,12 +132,10 @@ export function AuthProvider({ children }) {
 
         if (insertError) {
           console.error('[AuthContext] fallback profile insert failed:', insertError);
-          // Even if insert fails, we need to stop the spinner
           setLoading(false);
           return;
         }
 
-        // Re-fetch the newly created row
         const { data: newProfile, error: refetchError } = await supabase
           .from('users')
           .select('*')
@@ -155,15 +143,42 @@ export function AuthProvider({ children }) {
           .single();
 
         if (refetchError) throw refetchError;
-        setProfile(newProfile);
-        setUser(newProfile);
-        setLoading(false); // SUCCESS
+
+        // Enrich with auth email
+        const { data: { user: authUserFresh } } = await supabase.auth.getUser();
+        const enriched = { ...newProfile, email: newProfile.email || authUserFresh?.email };
+        setProfile(enriched);
+        setUser(enriched);
+        setLoading(false);
         return;
       }
 
       if (error) throw error;
-      setProfile(data);
-      setUser(data);
+
+      // Enrich profile with auth email
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const metaRole = authUser?.user_metadata?.role;
+      let profileData = data;
+
+      // Auto-sync role if auth metadata has 'admin' but database profile has 'user'
+      if (data && metaRole === 'admin' && data.role !== 'admin') {
+        console.log('[AuthContext] Syncing database profile role to admin...');
+        const { data: updatedProfile, error: syncError } = await supabase
+          .from('users')
+          .update({ role: 'admin' })
+          .eq('id', userId)
+          .select()
+          .single();
+        if (!syncError && updatedProfile) {
+          profileData = updatedProfile;
+        } else {
+          console.error('[AuthContext] Failed to sync database profile role:', syncError);
+        }
+      }
+
+      const enriched = { ...profileData, email: profileData.email || authUser?.email };
+      setProfile(enriched);
+      setUser(enriched);
       setLoading(false); // SUCCESS
     } catch (err) {
       console.error('[AuthContext] fetchProfile error:', err);
@@ -234,7 +249,6 @@ export function AuthProvider({ children }) {
     try {
       console.log('[AuthContext] Calling supabase.auth.signInWithPassword...');
       
-      // Wake the DB in parallel (helps with free-tier cold starts)
       wakeDatabase();
 
       let data, error;
@@ -249,7 +263,7 @@ export function AuthProvider({ children }) {
             AUTH_TIMEOUT_MS,
             `Sign in (attempt ${attempt})`
           ));
-          break; // success — exit the retry loop
+          break;
         } catch (timeoutErr) {
           lastErr = timeoutErr;
           console.warn(`[AuthContext] signIn attempt ${attempt} timed out:`, timeoutErr.message);
@@ -260,13 +274,11 @@ export function AuthProvider({ children }) {
         }
       }
 
-      // If both attempts timed out, throw the last error
       if (!data && lastErr) throw lastErr;
       
       if (error) {
         console.error('[AuthContext] signIn error:', error.message);
         recordFailedAttempt(email);
-        // Provide a friendly message for email-not-confirmed case
         if (error.message?.toLowerCase().includes('email not confirmed')) {
           return { success: false, error: 'Please verify your email before signing in. Check your inbox for a confirmation link.' };
         }
@@ -276,18 +288,26 @@ export function AuthProvider({ children }) {
       console.log('[AuthContext] signIn successful');
       clearLoginAttempts(email);
 
-      // Get role from user_metadata as a fallback, but fetch the true role from the database
-      // so manual promotions in the Supabase Dashboard take immediate effect.
       let role = data.user.user_metadata?.role || 'user';
       try {
-        const { data: profile } = await supabase
+        const { data: profileData } = await supabase
           .from('users')
           .select('role')
           .eq('id', data.user.id)
           .single();
           
-        if (profile?.role) {
-          role = profile.role;
+        if (profileData?.role) {
+          role = profileData.role;
+        }
+
+        // Auto-sync database profile role during sign in
+        if (data.user.user_metadata?.role === 'admin' && role !== 'admin') {
+          console.log('[AuthContext] Syncing database profile role to admin during signIn...');
+          await supabase
+            .from('users')
+            .update({ role: 'admin' })
+            .eq('id', data.user.id);
+          role = 'admin';
         }
       } catch (err) {
         console.warn('[AuthContext] Could not fetch fresh role during signIn, using metadata fallback.');
@@ -331,9 +351,6 @@ export function AuthProvider({ children }) {
         return { success: false, error: error.message || 'Failed to create account. Please try again.' };
       }
 
-      // When email confirmation is ON, Supabase returns data.user but data.session === null.
-      // When the email is already registered (but unconfirmed), it also returns data.user with
-      // data.user.identities being an empty array.
       if (data?.user?.identities?.length === 0) {
         console.warn('[AuthContext] signUp: email already registered (unconfirmed)');
         return { success: false, error: 'An account with this email already exists. Please sign in or check your inbox for a confirmation email.' };
@@ -373,6 +390,24 @@ export function AuthProvider({ children }) {
     }
   }
 
+  /**
+   * Mark the current user's onboarding as seen in the database.
+   * Called once from WelcomeScreen on new accounts.
+   */
+  async function markOnboardingSeen() {
+    if (!profile?.id) return;
+    try {
+      await supabase
+        .from('users')
+        .update({ has_seen_onboarding: true })
+        .eq('id', profile.id);
+      setProfile((prev) => ({ ...prev, has_seen_onboarding: true }));
+      setUser((prev) => ({ ...prev, has_seen_onboarding: true }));
+    } catch (err) {
+      console.error('[AuthContext] markOnboardingSeen error:', err);
+    }
+  }
+
   const value = {
     session,
     user,
@@ -384,6 +419,7 @@ export function AuthProvider({ children }) {
     signUp,
     signOut,
     refreshProfile,
+    markOnboardingSeen,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -19,19 +19,27 @@ import { Colors, Typography, Spacing, BorderRadius, Shadows } from '../../theme'
 
 const { width } = Dimensions.get('window');
 
-const STATIC_COLORS = ['#C17F5E', '#2C2522', '#8A7F7A', '#F5F1EC'];
-
 // Helper: build a fake cart-item shape for Checkout when using Buy Now
-function buildSingleItemCart(item, quantity) {
+function buildSingleItemCart(item, quantity, selectedVariant = null) {
+  const discountedPrice =
+    item.discount_percent > 0
+      ? item.price * (1 - item.discount_percent / 100)
+      : null;
+  const baseEffectivePrice = discountedPrice ?? item.price;
+  const variantAdjustment = selectedVariant?.price_adjustment || 0;
+  const effectivePrice = baseEffectivePrice + variantAdjustment;
+
   return [
     {
       id: `buynow-${item.id}`,
       quantity,
       furniture: {
         id: item.id,
-        name: item.name,
-        price: item.price,
-        image_url: item.image_url,
+        name: selectedVariant
+          ? `${item.name} (${selectedVariant.name}: ${selectedVariant.value})`
+          : item.name,
+        price: effectivePrice,
+        image_url: selectedVariant?.image_url || item.image_url,
         category: item.category,
       },
     },
@@ -41,45 +49,92 @@ function buildSingleItemCart(item, quantity) {
 export default function FurnitureDetailScreen({ route, navigation }) {
   const { item } = route.params;
   const { user } = useAuth();
-  const [selectedColor, setSelectedColor] = useState(0);
   const [quantity, setQuantity] = useState(1);
   const [addingToCart, setAddingToCart] = useState(false);
+  // Selected variant (default to null)
+  const [selectedVariant, setSelectedVariant] = useState(null); 
+  
+  // Compute effective price with discount and variant adjustment
+  const discountedPrice =
+    item.discount_percent > 0
+      ? item.price * (1 - item.discount_percent / 100)
+      : null;
+
+  const baseEffectivePrice = discountedPrice ?? item.price;
+  const variantAdjustment = selectedVariant?.price_adjustment || 0;
+  const effectivePrice = baseEffectivePrice + variantAdjustment;
+  const isOutOfStock = item.stock_quantity !== undefined && item.stock_quantity <= 0;
 
   const handleAddToCart = async () => {
     if (!user) {
       Toast.show({ type: 'info', text1: 'Please sign in to add items to your cart' });
       return;
     }
+    if (isOutOfStock) {
+      Toast.show({ type: 'info', text1: 'Out of Stock', text2: 'This item is currently unavailable.' });
+      return;
+    }
     
     setAddingToCart(true);
     
     try {
-      // Check if item already exists in cart
+      // Check if item already exists in cart (with the same variant)
       const { data: existingItems, error: fetchError } = await supabase
         .from('cart_items')
-        .select('*')
+        .select('id, quantity, selected_variant')
         .eq('user_id', user.id)
         .eq('furniture_id', item.id);
-        
+
       if (fetchError) throw fetchError;
+
+      // Fetch the latest stock from the database to ensure up‑to‑date validation
+      const { data: freshItem, error: stockErr } = await supabase
+        .from('furniture')
+        .select('stock_quantity')
+        .eq('id', item.id)
+        .single();
+      if (stockErr) throw stockErr;
+      const availableStock = freshItem?.stock_quantity ?? 0;
+
+      // Ensure the total quantity of all variants of this item in the cart does not exceed the available stock
+      const totalExistingQty = existingItems?.reduce((sum, existing) => sum + existing.quantity, 0) || 0;
+      if (totalExistingQty + quantity > availableStock) {
+        Toast.show({
+          type: 'info',
+          text1: `Only ${availableStock} in stock`,
+          text2: `You already have ${totalExistingQty} in your cart`,
+        });
+        setAddingToCart(false);
+        return;
+      }
       
-      if (existingItems && existingItems.length > 0) {
-        // Update existing quantity
-        const existing = existingItems[0];
+      const areVariantsEqual = (v1, v2) => {
+        if (!v1 && !v2) return true;
+        if (!v1 || !v2) return false;
+        return v1.name === v2.name && v1.value === v2.value;
+      };
+
+      const matchingItem = existingItems?.find(existing => 
+        areVariantsEqual(existing.selected_variant, selectedVariant)
+      );
+
+      if (matchingItem) {
+        // Update existing quantity for matching variant
         const { error: updateError } = await supabase
           .from('cart_items')
-          .update({ quantity: existing.quantity + quantity })
-          .eq('id', existing.id);
+          .update({ quantity: matchingItem.quantity + quantity })
+          .eq('id', matchingItem.id);
           
         if (updateError) throw updateError;
       } else {
-        // Insert new cart item
+        // Insert new cart item with selected variant
         const { error: insertError } = await supabase
           .from('cart_items')
           .insert({
             user_id: user.id,
             furniture_id: item.id,
             quantity: quantity,
+            selected_variant: selectedVariant,
           });
           
         if (insertError) throw insertError;
@@ -104,8 +159,12 @@ export default function FurnitureDetailScreen({ route, navigation }) {
       Toast.show({ type: 'info', text1: 'Please sign in to purchase items' });
       return;
     }
-    const fakeCart = buildSingleItemCart(item, quantity);
-    const total = item.price * quantity;
+    if (isOutOfStock) {
+      Toast.show({ type: 'info', text1: 'Out of Stock', text2: 'This item is currently unavailable.' });
+      return;
+    }
+    const fakeCart = buildSingleItemCart(item, quantity, selectedVariant);
+    const total = effectivePrice * quantity;
     navigation.navigate('Checkout', { cartItems: fakeCart, total });
   };
 
@@ -117,10 +176,15 @@ export default function FurnitureDetailScreen({ route, navigation }) {
         {/* Hero Image */}
         <View style={styles.imageContainer}>
           <Image
-            source={item.image_url ? { uri: item.image_url } : require('../../../assets/images/empty-list.png')}
+            source={selectedVariant && selectedVariant.image_url ? { uri: selectedVariant.image_url } : (item.image_url ? { uri: item.image_url } : require('../../../assets/images/empty-list.png'))}
             style={styles.image}
             resizeMode="cover"
           />
+          {item.discount_percent > 0 && (
+            <View style={styles.discountBadge}>
+              <Text style={styles.discountBadgeText}>-{item.discount_percent}% OFF</Text>
+            </View>
+          )}
           <View style={styles.headerButtons}>
             <TouchableOpacity style={styles.roundBtn} onPress={() => navigation.goBack()}>
               <Ionicons name="arrow-back" size={24} color={Colors.text} />
@@ -140,48 +204,69 @@ export default function FurnitureDetailScreen({ route, navigation }) {
           <View style={styles.titleRow}>
             <Text style={styles.category}>{item.category}</Text>
             <Text style={styles.title}>{item.name}</Text>
-            <Text style={styles.price}>${Number(item.price).toLocaleString()}</Text>
+
+            {/* Stock badge */}
+            {item.stock_quantity !== undefined && (
+              <Text style={[styles.stockBadge, isOutOfStock && styles.outOfStockBadge]}>
+                {isOutOfStock ? 'Out of Stock' : `${item.stock_quantity} in stock`}
+              </Text>
+            )}
+
+            {/* Price with discount */}
+            <Text style={styles.price}>₱{Number(effectivePrice).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</Text>
           </View>
 
-          {/* Color Selector */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Colors</Text>
-            <View style={styles.colorsRow}>
-              {STATIC_COLORS.map((color, index) => (
-                <TouchableOpacity
-                  key={index}
-                  style={[
-                    styles.colorOuter,
-                    selectedColor === index && { borderColor: color },
-                  ]}
-                  onPress={() => setSelectedColor(index)}
-                >
-                  <View style={[styles.colorInner, { backgroundColor: color }]} />
+          {/* Variants */}
+          {item.variants && item.variants.length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Variants</Text>
+              <TouchableOpacity onPress={() => setSelectedVariant(null)}>
+                <View style={[styles.variantRow, selectedVariant === null && styles.variantSelected]}>
+                  <Text style={styles.variantLabel}>Standard:</Text>
+                  <Text style={styles.variantValue}>No variant selected</Text>
+                  <Text style={styles.variantAdj}>₱0</Text>
+                </View>
+              </TouchableOpacity>
+              {item.variants.map((variant, index) => (
+                <TouchableOpacity key={index} onPress={() => setSelectedVariant(selectedVariant === variant ? null : variant)}>
+                  <View style={[styles.variantRow, selectedVariant === variant && styles.variantSelected]}>
+                    <Text style={styles.variantLabel}>{variant.name}:</Text>
+                    <Text style={styles.variantValue}>{variant.value}</Text>
+                    <Text style={styles.variantAdj}>
+                      {variant.price_adjustment > 0 ? '+' : variant.price_adjustment < 0 ? '-' : ''}₱{Math.abs(Number(variant.price_adjustment)).toLocaleString()}
+                    </Text>
+                  </View>
                 </TouchableOpacity>
               ))}
             </View>
-          </View>
+          )}
 
           {/* Quantity */}
           <View style={styles.section}>
-             <View style={styles.quantityHeader}>
-                <Text style={styles.sectionTitle}>Quantity</Text>
-                <View style={styles.quantityControl}>
-                  <TouchableOpacity 
-                    style={styles.qtyBtn} 
-                    onPress={() => setQuantity(Math.max(1, quantity - 1))}
-                  >
-                    <Ionicons name="remove" size={20} color={Colors.text} />
-                  </TouchableOpacity>
-                  <Text style={styles.qtyText}>{quantity}</Text>
-                  <TouchableOpacity 
-                    style={styles.qtyBtn}
-                    onPress={() => setQuantity(quantity + 1)}
-                  >
-                    <Ionicons name="add" size={20} color={Colors.text} />
-                  </TouchableOpacity>
-                </View>
-             </View>
+            <View style={styles.quantityHeader}>
+              <Text style={styles.sectionTitle}>Quantity</Text>
+              <View style={styles.quantityControl}>
+                <TouchableOpacity 
+                  style={styles.qtyBtn} 
+                  onPress={() => setQuantity(Math.max(1, quantity - 1))}
+                >
+                  <Ionicons name="remove" size={20} color={Colors.text} />
+                </TouchableOpacity>
+                <Text style={styles.qtyText}>{quantity}</Text>
+                <TouchableOpacity 
+                  style={styles.qtyBtn}
+                  onPress={() => {
+                    if (item.stock_quantity !== undefined && quantity >= item.stock_quantity) {
+                      Toast.show({ type: 'info', text1: `Only ${item.stock_quantity} in stock` });
+                      return;
+                    }
+                    setQuantity(quantity + 1);
+                  }}
+                >
+                  <Ionicons name="add" size={20} color={Colors.text} />
+                </TouchableOpacity>
+              </View>
+            </View>
           </View>
 
           {/* Description */}
@@ -197,28 +282,30 @@ export default function FurnitureDetailScreen({ route, navigation }) {
       {/* Bottom Actions */}
       <View style={styles.bottomBar}>
         <View style={styles.actionRow}>
-           <TouchableOpacity
-             style={styles.tryInRoomBtn}
-             onPress={() => navigation.navigate('ImagePlacement', { item })}
-           >
-             <Ionicons name="scan-outline" size={24} color={Colors.primary} />
-           </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.tryInRoomBtn}
+            onPress={() => navigation.navigate('ImagePlacement', { item })}
+          >
+            <Ionicons name="scan-outline" size={24} color={Colors.primary} />
+          </TouchableOpacity>
 
-           <View style={styles.ctaButtons}>
-             <Button
-               title="Add to Cart"
-               variant="outline"
-               loading={addingToCart}
-               onPress={handleAddToCart}
-               style={styles.addToCartBtn}
-             />
-             <Button
-               title="Buy Now"
-               variant="primary"
-               onPress={handleBuyNow}
-               style={styles.buyNowBtn}
-             />
-           </View>
+          <View style={styles.ctaButtons}>
+            <Button
+              title="Add to Cart"
+              variant="outline"
+              loading={addingToCart}
+              onPress={handleAddToCart}
+              style={styles.addToCartBtn}
+              disabled={isOutOfStock}
+            />
+            <Button
+              title={isOutOfStock ? 'Unavailable' : 'Buy Now'}
+              variant="primary"
+              onPress={handleBuyNow}
+              style={styles.buyNowBtn}
+              disabled={isOutOfStock}
+            />
+          </View>
         </View>
       </View>
     </View>
@@ -242,6 +329,21 @@ const styles = StyleSheet.create({
   image: {
     width: '100%',
     height: '100%',
+  },
+  discountBadge: {
+    position: 'absolute',
+    bottom: 44,
+    left: Spacing.xl,
+    backgroundColor: Colors.error,
+    borderRadius: BorderRadius.full,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs,
+    zIndex: 2,
+  },
+  discountBadgeText: {
+    fontSize: Typography.size.xs,
+    color: Colors.textInverse,
+    fontWeight: Typography.weight.bold,
   },
   headerButtons: {
     position: 'absolute',
@@ -285,6 +387,25 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.sm,
     lineHeight: 40,
   },
+  stockBadge: {
+    fontSize: Typography.size.xs,
+    color: Colors.success,
+    fontWeight: Typography.weight.bold,
+    marginBottom: Spacing.sm,
+  },
+  outOfStockBadge: {
+    color: Colors.error,
+  },
+  priceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  originalPrice: {
+    fontSize: Typography.size.lg,
+    color: Colors.textMuted,
+    textDecorationLine: 'line-through',
+  },
   price: {
     fontSize: Typography.size.xxl,
     fontWeight: Typography.weight.bold,
@@ -299,23 +420,35 @@ const styles = StyleSheet.create({
     color: Colors.text,
     marginBottom: Spacing.md,
   },
-  colorsRow: {
+  variantRow: {
     flexDirection: 'row',
-    gap: Spacing.md,
-  },
-  colorOuter: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: 2,
-    borderColor: 'transparent',
-    justifyContent: 'center',
     alignItems: 'center',
+    paddingVertical: Spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+    gap: Spacing.sm,
   },
-  colorInner: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
+  variantSelected: {
+    backgroundColor: Colors.surfaceElevated,
+    borderWidth: 2,
+    borderColor: Colors.primary,
+  },
+  variantLabel: {
+    fontSize: Typography.size.base,
+    color: Colors.textSecondary,
+    fontWeight: Typography.weight.medium,
+    minWidth: 70,
+  },
+  variantValue: {
+    fontSize: Typography.size.base,
+    color: Colors.text,
+    fontWeight: Typography.weight.semiBold,
+    flex: 1,
+  },
+  variantAdj: {
+    fontSize: Typography.size.sm,
+    color: Colors.primary,
+    fontWeight: Typography.weight.semiBold,
   },
   quantityHeader: {
     flexDirection: 'row',

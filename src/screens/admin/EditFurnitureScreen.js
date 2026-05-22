@@ -24,8 +24,17 @@ import {
   validatePrice,
   validateRequired,
   validateDescription,
+  validateStockQuantity,
+  validateDiscount,
 } from '../../utils/validation';
-import { sanitizeName, sanitizeNumeric, sanitizeDescription } from '../../utils/sanitize';
+import {
+  sanitizeName,
+  sanitizeNumeric,
+  sanitizeDescription,
+  sanitizeAlphanumericSpace,
+  sanitizeVariantChoice,
+  sanitizeSignedNumeric,
+} from '../../utils/sanitize';
 import { validateImageAsset, generateStorageFileName, getContentType } from '../../utils/imageUtils';
 
 const CATEGORIES = ['Living Room', 'Bedroom', 'Dining', 'Office', 'Outdoor', 'Kids'];
@@ -38,6 +47,9 @@ export default function EditFurnitureScreen({ route, navigation }) {
     price: item.price ? String(item.price) : '',
     description: item.description || '',
     category: item.category || CATEGORIES[0],
+    stock_quantity: item.stock_quantity !== undefined ? String(item.stock_quantity) : '',
+    discount_percent: item.discount_percent ? String(item.discount_percent) : '',
+    variants: item.variants || [],
   });
   
   const [imageAsset, setImageAsset] = useState(null);
@@ -51,6 +63,9 @@ export default function EditFurnitureScreen({ route, navigation }) {
   function setField(field, value) {
     setForm((f) => ({ ...f, [field]: value }));
     if (errors[field]) setErrors((e) => ({ ...e, [field]: undefined }));
+    if (field === 'variants' && errors.variants) {
+      setErrors((e) => ({ ...e, variants: undefined }));
+    }
   }
 
   async function pickImage() {
@@ -90,6 +105,41 @@ export default function EditFurnitureScreen({ route, navigation }) {
     if (!categoryResult.valid) newErrors.category = categoryResult.message;
     const descResult = validateDescription(form.description);
     if (!descResult.valid) newErrors.description = descResult.message;
+    const stockResult = validateStockQuantity(form.stock_quantity);
+    if (!stockResult.valid) newErrors.stock_quantity = stockResult.message;
+    const discountResult = validateDiscount(form.discount_percent);
+    if (!discountResult.valid) newErrors.discount_percent = discountResult.message;
+
+    // Validate Variants array
+    const variantErrors = [];
+    let hasVariantErrors = false;
+    form.variants.forEach((v, index) => {
+      const rowErrors = {};
+      const hasAny = (v.name && v.name.trim()) || (v.value && v.value.trim()) || (v.price_adjustment && String(v.price_adjustment).trim());
+      if (hasAny) {
+        if (!v.name || !v.name.trim()) {
+          rowErrors.name = 'Type is required';
+          hasVariantErrors = true;
+        }
+        if (!v.value || !v.value.trim()) {
+          rowErrors.value = 'Choice is required';
+          hasVariantErrors = true;
+        }
+        if (v.price_adjustment && String(v.price_adjustment).trim()) {
+          const parsed = parseFloat(v.price_adjustment);
+          if (isNaN(parsed)) {
+            rowErrors.price_adjustment = 'Invalid number';
+            hasVariantErrors = true;
+          }
+        }
+      }
+      variantErrors[index] = rowErrors;
+    });
+
+    if (hasVariantErrors) {
+      newErrors.variants = variantErrors;
+    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   }
@@ -120,7 +170,7 @@ export default function EditFurnitureScreen({ route, navigation }) {
       const cleanPrice = parseFloat(sanitizeNumeric(form.price));
       const cleanDesc = sanitizeDescription(form.description);
 
-      const { error: updateError } = await supabase
+      const { data, error: updateError } = await supabase
         .from('furniture')
         .update({
           name: cleanName,
@@ -128,10 +178,21 @@ export default function EditFurnitureScreen({ route, navigation }) {
           image_url: finalImageUrl,
           description: cleanDesc,
           category: form.category,
+          stock_quantity: parseInt(form.stock_quantity, 10) || 0,
+          discount_percent: parseFloat(form.discount_percent) || 0,
+          variants: form.variants.filter(v => v.name && v.name.trim() && v.value && v.value.trim()).map(v => ({
+            name: v.name.trim(),
+            value: v.value.trim(),
+            price_adjustment: parseFloat(v.price_adjustment) || 0,
+          })),
         })
-        .eq('id', item.id);
+        .eq('id', item.id)
+        .select();
 
       if (updateError) throw updateError;
+      if (!data || data.length === 0) {
+        throw new Error('Access Denied: You do not have permission to update this product.');
+      }
 
       await logActivity('EDIT', cleanName);
 
@@ -142,7 +203,13 @@ export default function EditFurnitureScreen({ route, navigation }) {
       });
       navigation.goBack();
     } catch (err) {
-      Toast.show({ type: 'error', text1: 'Error', text2: 'Failed to update furniture. Please try again.' });
+      console.error('[EditFurnitureScreen] handleSave error:', err);
+      const errMsg = err.message || err.details || String(err);
+      Toast.show({
+        type: 'error',
+        text1: 'Failed to Update Furniture',
+        text2: errMsg,
+      });
     } finally {
       setLoading(false);
     }
@@ -220,7 +287,7 @@ export default function EditFurnitureScreen({ route, navigation }) {
 
           <Input
             inputRef={priceRef}
-            label="Price (USD)"
+            label="Price (₱)"
             value={form.price}
             onChangeText={(v) => setField('price', sanitizeNumeric(v))}
             placeholder="e.g. 299.99"
@@ -230,6 +297,93 @@ export default function EditFurnitureScreen({ route, navigation }) {
             onSubmitEditing={() => descRef.current?.focus()}
             leftIcon={<Ionicons name="pricetag-outline" size={18} color={Colors.textSecondary} />}
           />
+
+          <Input
+            label="Stock Quantity"
+            value={form.stock_quantity}
+            onChangeText={(v) => setField('stock_quantity', sanitizeNumeric(v))}
+            placeholder="e.g. 50"
+            keyboardType="number-pad"
+            error={errors.stock_quantity}
+            leftIcon={<Ionicons name="layers-outline" size={18} color={Colors.textSecondary} />}
+          />
+
+          <Input
+            label="Discount % (optional)"
+            value={form.discount_percent}
+            onChangeText={(v) => setField('discount_percent', sanitizeNumeric(v))}
+            placeholder="e.g. 15"
+            keyboardType="decimal-pad"
+            error={errors.discount_percent}
+            leftIcon={<Ionicons name="pricetags-outline" size={18} color={Colors.textSecondary} />}
+          />
+
+          {/* Variants */}
+          <Text style={styles.categoryLabel}>Variants (optional)</Text>
+          {form.variants.map((variant, index) => (
+            <View key={index} style={styles.variantRow}>
+              <View style={styles.variantInputs}>
+                <Input
+                  label="Variant Type"
+                  value={variant.name}
+                  onChangeText={(v) => {
+                    const cleaned = sanitizeAlphanumericSpace(v);
+                    const updated = [...form.variants];
+                    updated[index] = { ...updated[index], name: cleaned };
+                    setField('variants', updated);
+                  }}
+                  placeholder="e.g. Color"
+                  containerStyle={styles.variantInput}
+                  error={errors.variants?.[index]?.name}
+                />
+                <Input
+                  label="Option Choice"
+                  value={variant.value}
+                  onChangeText={(v) => {
+                    const cleaned = sanitizeVariantChoice(v);
+                    const updated = [...form.variants];
+                    updated[index] = { ...updated[index], value: cleaned };
+                    setField('variants', updated);
+                  }}
+                  placeholder="e.g. Walnut"
+                  containerStyle={styles.variantInput}
+                  error={errors.variants?.[index]?.value}
+                />
+                <Input
+                  label="Price Impact (₱)"
+                  value={variant.price_adjustment}
+                  onChangeText={(v) => {
+                    const cleaned = sanitizeSignedNumeric(v);
+                    const updated = [...form.variants];
+                    updated[index] = { ...updated[index], price_adjustment: cleaned };
+                    setField('variants', updated);
+                  }}
+                  placeholder="e.g. +500"
+                  keyboardType="numeric"
+                  containerStyle={styles.variantInputSmall}
+                  error={errors.variants?.[index]?.price_adjustment}
+                />
+              </View>
+              <TouchableOpacity
+                onPress={() => {
+                  const updated = form.variants.filter((_, i) => i !== index);
+                  setField('variants', updated);
+                }}
+                style={styles.removeVariantBtn}
+              >
+                <Ionicons name="close-circle" size={22} color={Colors.error} />
+              </TouchableOpacity>
+            </View>
+          ))}
+          <TouchableOpacity
+            style={styles.addVariantBtn}
+            onPress={() => {
+              setField('variants', [...form.variants, { name: '', value: '', price_adjustment: '' }]);
+            }}
+          >
+            <Ionicons name="add-circle-outline" size={20} color={Colors.primary} />
+            <Text style={styles.addVariantText}>Add Variant</Text>
+          </TouchableOpacity>
 
           {/* Category selector */}
           <Text style={styles.categoryLabel}>Category</Text>
@@ -419,4 +573,39 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.base,
   },
   saveBtn: { marginTop: Spacing.sm },
+  variantRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.sm,
+    marginBottom: Spacing.sm,
+  },
+  variantInputs: {
+    flex: 1,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.sm,
+  },
+  variantInput: {
+    flex: 1,
+    minWidth: 100,
+  },
+  variantInputSmall: {
+    width: 80,
+  },
+  removeVariantBtn: {
+    marginTop: 28,
+    padding: Spacing.xs,
+  },
+  addVariantBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingVertical: Spacing.md,
+    marginBottom: Spacing.base,
+  },
+  addVariantText: {
+    fontSize: Typography.size.sm,
+    color: Colors.primary,
+    fontWeight: Typography.weight.semiBold,
+  },
 });
